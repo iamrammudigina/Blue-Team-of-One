@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The bounce that lied: when "Delivered" isn't delivered — Blue Team of One</title>
+<meta name="description" content="A mail trace showed Delivered while messages kept bouncing. The full anatomy of email delivery — DNS, SMTP, SPF/DKIM/DMARC, and reading an NDR — and the one habit that diagnoses these in a minute.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=15">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/email/" aria-current="page">Email</a>
+      <a href="/identity/">Identity</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud-ir/">Cloud &amp; IR</a>
+      <a href="/about.html">About</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/email/">Email</a><span class="sep">›</span><a href="/email/delivery.html">Delivery &amp; mail flow</a></p>
+    <p class="eyebrow"><span class="dot"></span>Deep dive · Email delivery</p>
+    <h1>The bounce that lied: when <em>"Delivered"</em> isn't delivered</h1>
+    <p class="lede">A user's mail to a client kept bouncing — while every trace on our side showed the message as Delivered. Here's the full anatomy of how email actually travels, and the one habit that cracks these cases in about a minute.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 12, 2026</span>
+      <span>~11 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>Most people picture email as one thing: type, click Send, it appears. In reality every message is a small parcel handed through a chain of at least six independent systems, each with its own job. If any link fails or refuses, the message never arrives — and the failure always happens at one specific stage. Learning to find the broken link fast is most of the skill.</p>
+
+<p>This walkthrough is built around a real troubleshooting case (anonymized). The setup: a finance user was emailing a client's CFO. Some messages arrived normally; others bounced. And here's the twist that makes the case worth studying — both the Exchange Online message trace and the outbound gateway logs showed every message as <strong>Delivered</strong>. On paper, nothing was wrong. Yet the bounces kept coming.</p>
+
+<h2 class="head"><span class="num">01</span>The journey every email takes</h2>
+<p class="sub">Six stages, six chances to fail.</p>
+
+<figure>
+<svg viewBox="0 0 720 168" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="An email passes through six stages: sender app, sender mail server, outbound gateway, DNS lookup, inbound gateway, and recipient mailbox.">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#8A93A1" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<!-- 6 stages -->
+<!-- stage template -->
+<g font-family="IBM Plex Sans,sans-serif">
+  <!-- 1 -->
+  <rect x="8" y="46" width="100" height="76" rx="11" fill="#E6F1FB" stroke="#1A69B8" stroke-width="1"/>
+  <circle cx="26" cy="64" r="10" fill="#1A69B8"/><text x="26" y="68" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">1</text>
+  <text x="58" y="90" text-anchor="middle" font-size="11.5" font-weight="600" fill="#0C447C">Sender app</text>
+  <text x="58" y="106" text-anchor="middle" font-size="9.5" fill="#5A6472">Outlook</text>
+  <line x1="108" y1="84" x2="122" y2="84" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#ar)"/>
+  <!-- 2 -->
+  <rect x="122" y="46" width="100" height="76" rx="11" fill="#E6F1FB" stroke="#1A69B8" stroke-width="1"/>
+  <circle cx="140" cy="64" r="10" fill="#1A69B8"/><text x="140" y="68" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">2</text>
+  <text x="172" y="90" text-anchor="middle" font-size="11.5" font-weight="600" fill="#0C447C">Mail server</text>
+  <text x="172" y="106" text-anchor="middle" font-size="9.5" fill="#5A6472">Exchange</text>
+  <line x1="222" y1="84" x2="236" y2="84" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#ar)"/>
+  <!-- 3 -->
+  <rect x="236" y="46" width="100" height="76" rx="11" fill="#FBF1DC" stroke="#B0700C" stroke-width="1"/>
+  <circle cx="254" cy="64" r="10" fill="#B0700C"/><text x="254" y="68" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">3</text>
+  <text x="286" y="90" text-anchor="middle" font-size="11.5" font-weight="600" fill="#6B430A">Outbound gw</text>
+  <text x="286" y="106" text-anchor="middle" font-size="9.5" fill="#5A6472">scan + policy</text>
+  <line x1="336" y1="84" x2="350" y2="84" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#ar)"/>
+  <!-- 4 -->
+  <rect x="350" y="46" width="100" height="76" rx="11" fill="#EEF1F5" stroke="#8A93A1" stroke-width="1"/>
+  <circle cx="368" cy="64" r="10" fill="#5A6472"/><text x="368" y="68" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">4</text>
+  <text x="400" y="90" text-anchor="middle" font-size="11.5" font-weight="600" fill="#0E1521">DNS lookup</text>
+  <text x="400" y="106" text-anchor="middle" font-size="9.5" fill="#5A6472">MX + A</text>
+  <line x1="450" y1="84" x2="464" y2="84" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#ar)"/>
+  <!-- 5 -->
+  <rect x="464" y="46" width="100" height="76" rx="11" fill="#FBF1DC" stroke="#B0700C" stroke-width="1"/>
+  <circle cx="482" cy="64" r="10" fill="#B0700C"/><text x="482" y="68" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">5</text>
+  <text x="514" y="90" text-anchor="middle" font-size="11.5" font-weight="600" fill="#6B430A">Inbound gw</text>
+  <text x="514" y="106" text-anchor="middle" font-size="9.5" fill="#5A6472">spam / auth</text>
+  <line x1="564" y1="84" x2="578" y2="84" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#ar)"/>
+  <!-- 6 -->
+  <rect x="578" y="46" width="100" height="76" rx="11" fill="#EDF3E0" stroke="#3B6D11" stroke-width="1"/>
+  <circle cx="596" cy="64" r="10" fill="#3B6D11"/><text x="596" y="68" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">6</text>
+  <text x="628" y="90" text-anchor="middle" font-size="11.5" font-weight="600" fill="#274F0A">Mailbox</text>
+  <text x="628" y="106" text-anchor="middle" font-size="9.5" fill="#5A6472">inbox / spam</text>
+</g>
+<text x="360" y="24" text-anchor="middle" font-family="Space Grotesk,sans-serif" font-size="14" font-weight="600" fill="#0E1521">The journey of one email</text>
+</svg>
+<figcaption><b>Six stages.</b> Sender app → sender's mail server → outbound gateway → DNS lookup → recipient's inbound gateway → mailbox. Think of it as a letter through the postal system: your post office sorts it, customs scans it on the way out, the driver looks up the address, the destination customs checks it, the carrier drops it in the box.</figcaption>
+</figure>
+
+<p>Between stages 2 and 3, two mail servers actually talk using SMTP — a plain back-and-forth, like a polite phone call. It matters because the responses in that conversation are exactly what later show up in a bounce:</p>
+
+<div class="smtp">
+  <div class="s">EHLO mx01.gateway<span class="lbl">sender introduces itself</span></div>
+  <div class="r">220 ready<span class="lbl">server answers</span></div>
+  <div class="s">MAIL FROM: &lt;user@fabrikam.com&gt;<span class="lbl">envelope sender (gets bounces)</span></div>
+  <div class="r">250 OK<span class="lbl">sender accepted</span></div>
+  <div class="s">RCPT TO: &lt;cfo@contoso.com&gt;<span class="lbl">envelope recipient</span></div>
+  <div class="r">250 OK<span class="lbl">recipient accepted</span></div>
+  <div class="s">DATA … headers + body … .<span class="lbl">the message itself</span></div>
+  <div class="r">250 accepted for delivery<span class="lbl">handed off</span></div>
+</div>
+
+<p>Two things trip everyone up here. First, the <strong>envelope</strong> (MAIL FROM / RCPT TO — what servers route on) is a different layer from the <strong>headers</strong> (From / To / Subject — what humans see); they can legitimately differ. Second, every SMTP response is a numbered code whose first digit tells you the whole story: <span class="k">2xx</span> success, <span class="k">3xx</span> intermediate, <span class="k">4xx</span> temporary (will retry), <span class="k">5xx</span> permanent (bounces). That single digit tells you instantly whether a problem is fatal or will clear on its own.</p>
+
+<div class="analogy">
+  <p class="tag">The key insight</p>
+  <p>"Delivered" in a message trace usually means "successfully handed off to the next stage," <em>not</em> "the recipient is reading it." This is the single most common source of confusion when troubleshooting — and it's the exact trap in this case.</p>
+</div>
+
+<h2 class="head"><span class="num">02</span>Reading the NDR — the most honest document you'll get</h2>
+<p class="sub">The bounce isn't bad news to delete. It's a machine-readable confession.</p>
+
+<p>When a server gives up, it generates a Non-Delivery Report — a bounce, addressed back to the sender, stating exactly what failed. People delete these unread. That's backwards: the NDR is the best diagnostic you have. Here's the one that cracked this case:</p>
+
+<pre class="code">550 5.1.2 &lt;cfo@contoso.com&gt;... Host unknown
+ (Name server: contoso-com.mail.protection.outlook.com:
+  <b>host not found</b>)</pre>
+
+<figure>
+<svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Four things to extract from every NDR: who generated it, the SMTP code family, the enhanced status code, and the human-readable error.">
+<rect x="8" y="34" width="330" height="240" rx="14" fill="#0E1626" stroke="#24314B" stroke-width="1"/>
+<text x="28" y="62" font-family="IBM Plex Mono,monospace" font-size="11.5" fill="#F2B8B8">⚠ Undeliverable: Draft</text>
+<text x="28" y="86" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="#8593AC">From: MAILER-DAEMON@mx0a.pphosted.com</text>
+<text x="28" y="102" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="#8593AC">To: user@fabrikam.com</text>
+<line x1="28" y1="118" x2="318" y2="118" stroke="#24314B" stroke-width="1"/>
+<text x="28" y="150" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="#D6DEEA">550 5.1.2 &lt;cfo@contoso.com&gt;</text>
+<text x="28" y="168" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="#D6DEEA">   ... Host unknown</text>
+<text x="28" y="192" font-family="IBM Plex Mono,monospace" font-size="10" fill="#8593AC">(Name server:</text>
+<text x="28" y="207" font-family="IBM Plex Mono,monospace" font-size="10" fill="#8593AC"> contoso-com.mail.protection</text>
+<text x="28" y="221" font-family="IBM Plex Mono,monospace" font-size="10" fill="#8593AC"> .outlook.com:</text>
+<text x="28" y="239" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="#7FE0C2"> host not found)</text>
+<!-- callouts -->
+<g font-family="IBM Plex Sans,sans-serif">
+  <g><circle cx="366" cy="58" r="9" fill="#5147C9"/><text x="366" y="62" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">1</text>
+  <text x="384" y="55" font-size="12.5" font-weight="600" fill="#0E1521">Who generated it?</text>
+  <text x="384" y="72" font-size="11" fill="#5A6472">MAILER-DAEMON host = which server</text>
+  <text x="384" y="87" font-size="11" fill="#5A6472">gave up. Here: our own outbound gw.</text></g>
+  <g><circle cx="366" cy="118" r="9" fill="#5147C9"/><text x="366" y="122" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">2</text>
+  <text x="384" y="115" font-size="12.5" font-weight="600" fill="#0E1521">SMTP code family</text>
+  <text x="384" y="132" font-size="11" fill="#5A6472">550 → 5xx = permanent. It bounced,</text>
+  <text x="384" y="147" font-size="11" fill="#5A6472">won't retry.</text></g>
+  <g><circle cx="366" cy="178" r="9" fill="#5147C9"/><text x="366" y="182" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">3</text>
+  <text x="384" y="175" font-size="12.5" font-weight="600" fill="#0E1521">Enhanced status</text>
+  <text x="384" y="192" font-size="11" fill="#5A6472">5.1.2 = destination host can't be</text>
+  <text x="384" y="207" font-size="11" fill="#5A6472">resolved. A DNS problem, not a mailbox.</text></g>
+  <g><circle cx="366" cy="238" r="9" fill="#5147C9"/><text x="366" y="242" text-anchor="middle" font-size="11" fill="#fff" font-weight="600">4</text>
+  <text x="384" y="235" font-size="12.5" font-weight="600" fill="#0E1521">Human-readable error</text>
+  <text x="384" y="252" font-size="11" fill="#5A6472">"host not found" names the exact</text>
+  <text x="384" y="267" font-size="11" fill="#5A6472">hostname to go investigate.</text></g>
+</g>
+</svg>
+<figcaption><b>Four things to extract from every NDR.</b> Who generated it, the code family, the enhanced status code, and the plain-English error. Train yourself to pull these four and you'll diagnose most email problems in under a minute.</figcaption>
+</figure>
+
+<p>The enhanced status codes (the dotted number) are worth memorizing — they point straight at the stage that failed:</p>
+
+<table class="ref">
+  <tr><td class="c">5.1.1</td><td>Recipient mailbox doesn't exist (bad username).</td></tr>
+  <tr><td class="c">5.1.2</td><td>Destination host can't be resolved — a DNS problem on the recipient side.</td></tr>
+  <tr><td class="c">5.4.1</td><td>No answer from the destination host (timeout / network).</td></tr>
+  <tr><td class="c">5.7.1</td><td>Policy rejection — the receiver refused (blocklist, compliance).</td></tr>
+  <tr><td class="c">5.7.26</td><td>Authentication failure (SPF/DKIM/DMARC) — a sender-side problem.</td></tr>
+</table>
+
+<h2 class="head"><span class="num">03</span>The three locks: SPF, DKIM, DMARC</h2>
+<p class="sub">SMTP has no built-in way to verify who anyone is. These three layers, all riding on DNS, fix that.</p>
+
+<figure>
+<svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The three email authentication layers: SPF is a guest list of allowed sending IPs, DKIM is a wax seal proving the message was not altered, and DMARC is the rulebook for what to do when checks fail.">
+<g font-family="IBM Plex Sans,sans-serif">
+  <!-- SPF -->
+  <rect x="8" y="20" width="226" height="216" rx="14" fill="#FFFFFF" stroke="#C7DDF3" stroke-width="1"/>
+  <rect x="8" y="20" width="226" height="42" rx="14" fill="#E6F1FB"/><rect x="8" y="48" width="226" height="14" fill="#E6F1FB"/>
+  <text x="121" y="41" text-anchor="middle" font-family="Space Grotesk,sans-serif" font-size="16" font-weight="600" fill="#0C447C">SPF</text>
+  <text x="121" y="56" text-anchor="middle" font-size="10" fill="#1A69B8">Sender Policy Framework</text>
+  <text x="26" y="88" font-size="11.5" font-weight="600" fill="#0E1521">The guest list</text>
+  <text x="26" y="110" font-size="11" fill="#5A6472">Domain owner publishes which</text>
+  <text x="26" y="125" font-size="11" fill="#5A6472">mail servers may send for it.</text>
+  <text x="26" y="140" font-size="11" fill="#5A6472">Receiver checks the sending IP.</text>
+  <text x="26" y="176" font-size="10" fill="#8A93A1" font-family="IBM Plex Mono,monospace">Lives in: DNS TXT</text>
+  <text x="26" y="200" font-size="9.5" fill="#8A93A1" font-family="IBM Plex Mono,monospace">v=spf1 include:...</text>
+  <text x="26" y="214" font-size="9.5" fill="#8A93A1" font-family="IBM Plex Mono,monospace">-all</text>
+  <!-- DKIM -->
+  <rect x="247" y="20" width="226" height="216" rx="14" fill="#FFFFFF" stroke="#BFE0D4" stroke-width="1"/>
+  <rect x="247" y="20" width="226" height="42" rx="14" fill="#E1F0EB"/><rect x="247" y="48" width="226" height="14" fill="#E1F0EB"/>
+  <text x="360" y="41" text-anchor="middle" font-family="Space Grotesk,sans-serif" font-size="16" font-weight="600" fill="#0B4A3A">DKIM</text>
+  <text x="360" y="56" text-anchor="middle" font-size="10" fill="#0F6E56">DomainKeys Identified Mail</text>
+  <text x="265" y="88" font-size="11.5" font-weight="600" fill="#0E1521">The wax seal</text>
+  <text x="265" y="110" font-size="11" fill="#5A6472">Sender signs the message with</text>
+  <text x="265" y="125" font-size="11" fill="#5A6472">a private key; public key is in</text>
+  <text x="265" y="140" font-size="11" fill="#5A6472">DNS. Proves it wasn't altered.</text>
+  <text x="265" y="176" font-size="10" fill="#8A93A1" font-family="IBM Plex Mono,monospace">Lives in: header + TXT</text>
+  <text x="265" y="200" font-size="9.5" fill="#8A93A1" font-family="IBM Plex Mono,monospace">d=fabrikam.com;</text>
+  <text x="265" y="214" font-size="9.5" fill="#8A93A1" font-family="IBM Plex Mono,monospace">s=selector1; b=...</text>
+  <!-- DMARC -->
+  <rect x="486" y="20" width="226" height="216" rx="14" fill="#FFFFFF" stroke="#EDD9AC" stroke-width="1"/>
+  <rect x="486" y="20" width="226" height="42" rx="14" fill="#FBF1DC"/><rect x="486" y="48" width="226" height="14" fill="#FBF1DC"/>
+  <text x="599" y="41" text-anchor="middle" font-family="Space Grotesk,sans-serif" font-size="16" font-weight="600" fill="#6B430A">DMARC</text>
+  <text x="599" y="56" text-anchor="middle" font-size="10" fill="#B0700C">The rulebook</text>
+  <text x="504" y="88" font-size="11.5" font-weight="600" fill="#0E1521">What to do on fail</text>
+  <text x="504" y="110" font-size="11" fill="#5A6472">Tells receivers: ignore, spam,</text>
+  <text x="504" y="125" font-size="11" fill="#5A6472">or reject — and requires the</text>
+  <text x="504" y="140" font-size="11" fill="#5A6472">From domain to align.</text>
+  <text x="504" y="176" font-size="10" fill="#8A93A1" font-family="IBM Plex Mono,monospace">Lives in: _dmarc TXT</text>
+  <text x="504" y="200" font-size="9.5" fill="#8A93A1" font-family="IBM Plex Mono,monospace">v=DMARC1;</text>
+  <text x="504" y="214" font-size="9.5" fill="#8A93A1" font-family="IBM Plex Mono,monospace">p=reject; rua=...</text>
+</g>
+</svg>
+<figcaption><b>Nested checks.</b> SPF verifies the source IP. DKIM verifies the message wasn't tampered with. DMARC ties both back to the visible From address and dictates the response. All three sit alongside SMTP, using DNS as the trust anchor.</figcaption>
+</figure>
+
+<pre class="code">fabrikam.com  TXT  "v=spf1 include:spf.protection.outlook.com <b>-all</b>"
+_dmarc.fabrikam.com  TXT  "v=DMARC1; <b>p=reject</b>; rua=mailto:dmarc@fabrikam.com"</pre>
+
+<p>When a message you send is rejected with a code in the <span class="k">5.7.x</span> family (especially <span class="k">5.7.26</span>), that's an authentication problem on <em>your</em> side — check that SPF, DKIM, and DMARC all pass in the sent message's headers. In this case, they did. Our authentication was clean. The failure was somewhere else entirely.</p>
+
+<h2 class="head"><span class="num">04</span>The case: a bounce that outran its trace</h2>
+<p class="sub">Clean handoffs on our side, bounces from our own gateway. Follow the chain.</p>
+
+<p>Our outbound path was spotless: Outlook → Exchange Online → outbound gateway, logged successfully at every hop, SPF/DKIM/DMARC all passing. So why the bounce? The clue was <em>who</em> sent the NDR — it came from <strong>our own outbound gateway</strong>, not the recipient's server. That single fact means the message never reached the recipient's network. The gateway looked up where to deliver, and couldn't.</p>
+
+<figure>
+<svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The delivery chain: sender, mail server, and outbound gateway all succeed; the MX lookup succeeds; but the A-record lookup for the MX target fails, so the recipient server is never reached and a bounce is generated.">
+<defs><marker id="ok" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#3B6D11" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<g font-family="IBM Plex Sans,sans-serif">
+  <!-- row of nodes -->
+  <g>
+    <rect x="8" y="60" width="118" height="56" rx="11" fill="#EDF3E0" stroke="#3B6D11" stroke-width="1"/>
+    <text x="67" y="84" text-anchor="middle" font-size="11.5" font-weight="600" fill="#274F0A">Outbound gw</text>
+    <text x="67" y="100" text-anchor="middle" font-size="9.5" fill="#5A6472">handoff OK</text>
+    <path d="M112 68l4 4 7-8" fill="none" stroke="#3B6D11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="126" y1="88" x2="142" y2="88" stroke="#3B6D11" stroke-width="1.4" marker-end="url(#ok)"/>
+
+    <rect x="142" y="60" width="118" height="56" rx="11" fill="#EDF3E0" stroke="#3B6D11" stroke-width="1"/>
+    <text x="201" y="84" text-anchor="middle" font-size="11.5" font-weight="600" fill="#274F0A">DNS: MX</text>
+    <text x="201" y="100" text-anchor="middle" font-size="9.5" fill="#5A6472">record found</text>
+    <path d="M246 68l4 4 7-8" fill="none" stroke="#3B6D11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="260" y1="88" x2="276" y2="88" stroke="#3B6D11" stroke-width="1.4" marker-end="url(#ok)"/>
+
+    <rect x="276" y="60" width="128" height="56" rx="11" fill="#FBE9E9" stroke="#A32D2D" stroke-width="1.4"/>
+    <text x="340" y="84" text-anchor="middle" font-size="11.5" font-weight="600" fill="#7A1F1F">DNS: A record</text>
+    <text x="340" y="100" text-anchor="middle" font-size="9.5" fill="#7A1F1F">for MX target</text>
+    <path d="M388 70l12 12M400 70l-12 12" stroke="#A32D2D" stroke-width="2" stroke-linecap="round"/>
+    <line x1="404" y1="88" x2="420" y2="88" stroke="#A32D2D" stroke-width="1.4"/>
+    <path d="M424 82l10 12M434 82l-10 12" stroke="#A32D2D" stroke-width="2.2" stroke-linecap="round"/>
+
+    <rect x="448" y="60" width="118" height="56" rx="11" fill="#F1F2F5" stroke="#C6CDD7" stroke-width="1" stroke-dasharray="4 3"/>
+    <text x="507" y="84" text-anchor="middle" font-size="11.5" font-weight="600" fill="#8A93A1">Recipient</text>
+    <text x="507" y="100" text-anchor="middle" font-size="9.5" fill="#8A93A1">never reached</text>
+  </g>
+  <!-- break note -->
+  <rect x="8" y="150" width="704" height="84" rx="12" fill="#FBE9E9" stroke="#EBC9C9" stroke-width="1"/>
+  <text x="28" y="176" font-family="IBM Plex Mono,monospace" font-size="11" fill="#7A1F1F" font-weight="500">WHERE IT BROKE</text>
+  <text x="28" y="198" font-size="12.5" fill="#5A2020">The recipient's MX record pointed to a hostname that had <tspan font-weight="600">no A record</tspan>.</text>
+  <text x="28" y="216" font-size="12.5" fill="#5A2020">The address book said "deliver here" — but "here" had no IP address. DNS returned</text>
+  <text x="28" y="234" font-size="12.5" fill="#5A2020">NXDOMAIN, our gateway had nowhere to connect, and it generated the bounce.</text>
+</g>
+</svg>
+<figcaption><b>Where the chain broke.</b> The MX lookup succeeded and handed back a hostname — but that hostname had no A record, so it couldn't be resolved to an IP. No mail server anywhere on the internet could complete delivery to that domain.</figcaption>
+</figure>
+
+<p>Three independent tools confirmed it, which matters enormously for what comes next — you never escalate to a third party on your word alone:</p>
+
+<p>A public MX lookup returned the recipient's MX target with no A record. A global DNS propagation check, querying resolvers around the world, agreed. And a native <span class="k">Resolve-DnsName</span> from a workstation confirmed the MX existed and its target did not. Three separate sources, one unambiguous finding: a recipient-side DNS misconfiguration.</p>
+
+<h2 class="head"><span class="num">05</span>Why some mail still got through</h2>
+<p class="sub">The most counterintuitive part — and the fingerprint that named the cause.</p>
+
+<p>If the recipient's DNS was broken, why did <em>older</em> messages deliver fine? The answer is <strong>DNS caching</strong>. At some earlier point the MX target <em>did</em> resolve, and our gateway cached that IP. While the cache was warm, deliveries succeeded — even after the underlying record broke. As cache entries aged out, the gateway re-queried authoritative DNS, got NXDOMAIN, and started bouncing. The pattern "older messages delivered, newer ones bounce" is a textbook cache-aging-out signature.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>TTL is why the failure was intermittent</h3>
+    <p>Every DNS record has a Time To Live — how long resolvers may cache it. A short TTL means changes (and breakages) propagate fast; a long TTL can hide a problem for a day. Intermittent, "sometimes it works" delivery failures are very often a caching or propagation artifact hiding a hard underlying fault.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">06</span>The workflow that catches most of these</h2>
+<p class="sub">Once you've seen one, you see the pattern everywhere.</p>
+
+<figure>
+<svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A five-step troubleshooting workflow: check the sender side, read the NDR, verify recipient DNS, check authentication, decide ownership and communicate with evidence.">
+<defs><marker id="aw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#8A93A1" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<g font-family="IBM Plex Sans,sans-serif">
+  <!-- steps left column -->
+  <g>
+    <rect x="8" y="18" width="430" height="44" rx="10" fill="#E6F1FB" stroke="#1A69B8" stroke-width="1"/>
+    <text x="24" y="38" font-size="12" font-weight="600" fill="#0C447C">1 · Check the sender side</text>
+    <text x="24" y="54" font-size="10.5" fill="#5A6472">Trace + gateway logs. "Delivered" = handed off, not received.</text>
+    <line x1="223" y1="62" x2="223" y2="72" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#aw)"/>
+    <rect x="8" y="72" width="430" height="44" rx="10" fill="#F1F2F5" stroke="#C6CDD7" stroke-width="1"/>
+    <text x="24" y="92" font-size="12" font-weight="600" fill="#0E1521">2 · Read the NDR</text>
+    <text x="24" y="108" font-size="10.5" fill="#5A6472">Who sent it, code family, enhanced status, plain error.</text>
+    <line x1="223" y1="116" x2="223" y2="126" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#aw)"/>
+    <rect x="8" y="126" width="430" height="44" rx="10" fill="#F1F2F5" stroke="#C6CDD7" stroke-width="1"/>
+    <text x="24" y="146" font-size="12" font-weight="600" fill="#0E1521">3 · Verify recipient DNS</text>
+    <text x="24" y="162" font-size="10.5" fill="#5A6472">MX → A chain, from multiple independent resolvers.</text>
+    <line x1="223" y1="170" x2="223" y2="180" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#aw)"/>
+    <rect x="8" y="180" width="430" height="44" rx="10" fill="#F1F2F5" stroke="#C6CDD7" stroke-width="1"/>
+    <text x="24" y="200" font-size="12" font-weight="600" fill="#0E1521">4 · Check authentication</text>
+    <text x="24" y="216" font-size="10.5" fill="#5A6472">SPF / DKIM / DMARC in the sent message headers.</text>
+    <line x1="223" y1="224" x2="223" y2="234" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#aw)"/>
+    <rect x="8" y="234" width="430" height="48" rx="10" fill="#EDF3E0" stroke="#3B6D11" stroke-width="1"/>
+    <text x="24" y="255" font-size="12" font-weight="600" fill="#274F0A">5 · Decide ownership, communicate with evidence</text>
+    <text x="24" y="271" font-size="10.5" fill="#5A6472">Sender fix, recipient fix, or transient — never escalate on a guess.</text>
+  </g>
+  <!-- code reference sidebar -->
+  <rect x="454" y="18" width="258" height="264" rx="12" fill="#FFFFFF" stroke="#E4E7EC" stroke-width="1"/>
+  <text x="472" y="40" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="#8A93A1" letter-spacing="1">SMTP CODES TO KNOW</text>
+  <g font-family="IBM Plex Mono,monospace" font-size="11">
+    <text x="472" y="66" fill="#0B4A3A" font-weight="500">5.1.1</text><text x="536" y="66" fill="#5A6472" font-family="IBM Plex Sans,sans-serif">bad mailbox</text>
+    <text x="472" y="88" fill="#0B4A3A" font-weight="500">5.1.2</text><text x="536" y="88" fill="#5A6472" font-family="IBM Plex Sans,sans-serif">bad host / DNS</text>
+    <text x="472" y="110" fill="#0B4A3A" font-weight="500">5.4.1</text><text x="536" y="110" fill="#5A6472" font-family="IBM Plex Sans,sans-serif">no answer / timeout</text>
+    <text x="472" y="132" fill="#0B4A3A" font-weight="500">5.7.1</text><text x="536" y="132" fill="#5A6472" font-family="IBM Plex Sans,sans-serif">policy reject</text>
+    <text x="472" y="154" fill="#0B4A3A" font-weight="500">5.7.26</text><text x="536" y="154" fill="#5A6472" font-family="IBM Plex Sans,sans-serif">auth failure</text>
+    <text x="472" y="176" fill="#0B4A3A" font-weight="500">4.x.x</text><text x="536" y="176" fill="#5A6472" font-family="IBM Plex Sans,sans-serif">temporary, retries</text>
+    <text x="472" y="198" fill="#0B4A3A" font-weight="500">2.x.x</text><text x="536" y="198" fill="#5A6472" font-family="IBM Plex Sans,sans-serif">success</text>
+  </g>
+  <line x1="472" y1="214" x2="694" y2="214" stroke="#E4E7EC" stroke-width="1"/>
+  <text x="472" y="234" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="#8A93A1" letter-spacing="1">VERIFY FROM OUTSIDE</text>
+  <text x="472" y="254" font-family="IBM Plex Sans,sans-serif" font-size="10.5" fill="#5A6472">Public MX lookup · global DNS</text>
+  <text x="472" y="269" font-family="IBM Plex Sans,sans-serif" font-size="10.5" fill="#5A6472">propagation · native DNS resolver</text>
+</g>
+</svg>
+<figcaption><b>The five-step workflow.</b> The order matters: confirm your own side is clean, let the NDR point you at the failed stage, verify from outside, rule out auth, then decide ownership. Most delivery problems fall out within a couple of steps.</figcaption>
+</figure>
+
+<p>The communication principle is the part people skip, and it's what separates a diagnosis from a hunch: <strong>never escalate to a third party without external, reproducible evidence.</strong> "Our trace shows Delivered" is not external — it's the very thing that misled us here. A public DNS lookup the other party can run themselves <em>is</em> external. Build the case from independently verifiable facts, then hand it off.</p>
+
+<div class="takeaway">
+  <p class="tag">The one habit</p>
+  <p>When a trace says <em>Delivered</em> but bounces keep coming, <em>don't trust the trace</em> — read the NDR. Find the server that generated it, read the code, and verify the recipient's DNS from outside. The truth is in the bounce, not the trace.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://datatracker.ietf.org/doc/html/rfc5321">RFC 5321 — Simple Mail Transfer Protocol</a><span>the SMTP conversation and reply codes</span></li>
+  <li><a href="https://datatracker.ietf.org/doc/html/rfc7489">RFC 7489 — DMARC</a><span>alignment and policy</span></li>
+  <li><a href="https://datatracker.ietf.org/doc/html/rfc3463">RFC 3463 — Enhanced Mail System Status Codes</a><span>the 5.x.x status codes</span></li>
+  <li><a href="https://mxtoolbox.com">MXToolbox</a><span>public MX / DNS health checks</span></li>
+</ul>
+</div>
+
+</div>
+</article>
+
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/email/">Email</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>

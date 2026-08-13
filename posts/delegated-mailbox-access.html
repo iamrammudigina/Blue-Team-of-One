@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reading someone else's mailbox without leaving the door open — Blue Team of One</title>
+<meta name="description" content="Granting yourself Full Access to another mailbox is easy. The part everyone forgets is removing it afterwards — and that standing delegation is a real security gap.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=15">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/email/">Email</a>
+      <a href="/identity/">Identity</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud-ir/">Cloud &amp; IR</a>
+      <a href="/exchange/" aria-current="page">Exchange</a>
+      <a href="/legal/">Legal</a>
+      <a href="/about.html">About</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/exchange/">Exchange Administration</a><span class="sep">›</span><a href="/exchange/access-delegation.html">Mailbox access &amp; delegation</a></p>
+    <p class="eyebrow"><span class="dot"></span>Field note · Exchange admin</p>
+    <h1>Reading another mailbox <em>without leaving the door open</em></h1>
+    <p class="lede">Granting yourself Full Access to someone else's mailbox takes thirty seconds. The step everyone forgets is taking it away again — and that leftover delegation is a standing security gap auditors love to find.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 12, 2026</span>
+      <span>~4 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>Support work regularly needs an admin to open a user's mailbox — investigating a mail-flow complaint, recovering an item, confirming a rule. The mechanism is <strong>Full Access</strong> delegation, and it's trivial to grant. That's exactly the problem: because it's so easy to add and invisible once added, delegations accumulate. Every one is an account that can silently read someone else's mail, and a pile of forgotten grants is a genuine confidentiality and audit exposure.</p>
+
+<p>The discipline is simple and non-negotiable: <strong>grant it, do the task, remove it.</strong> Treat the removal as part of the same task, not a later cleanup you'll get to.</p>
+
+<h2 class="head"><span class="num">01</span>Grant access (portal)</h2>
+<p class="sub">Exchange Admin Center — the quick path.</p>
+
+<p>In the Exchange Admin Center, go to <strong>Mailboxes</strong> and open the target mailbox. Under <strong>Mailbox delegation</strong>, edit the <strong>Read and manage (Full Access)</strong> list and add your account. Save. After a short propagation delay, open Outlook on the web, click your profile initials, choose <strong>Open another mailbox</strong>, enter the mailbox name, and open it.</p>
+
+<h2 class="head"><span class="num">02</span>Or by PowerShell</h2>
+<p class="sub">Faster, scriptable, and easier to audit.</p>
+
+<pre class="code"><span class="muted"># grant Full Access</span>
+Add-MailboxPermission -Identity target@contoso.com <span class="muted">`</span>
+  -User admin@contoso.com -AccessRights FullAccess -InheritanceType All
+
+<span class="muted"># ...do the task...</span>
+
+<span class="muted"># REMOVE it when done — this is the step that matters</span>
+Remove-MailboxPermission -Identity target@contoso.com <span class="muted">`</span>
+  -User admin@contoso.com -AccessRights FullAccess -Confirm:$false</pre>
+
+<p>Adding <span class="k">-AutoMapping:$false</span> to the grant stops the mailbox from auto-appearing in your Outlook profile — useful when you only need programmatic or brief access and don't want it lingering in your folder list.</p>
+
+<h2 class="head"><span class="num">03</span>Audit what's already delegated</h2>
+<p class="sub">Before you trust the environment, find the grants nobody removed.</p>
+
+<pre class="code"><span class="muted"># who has Full Access to a given mailbox?</span>
+Get-MailboxPermission -Identity target@contoso.com |
+  Where-Object { $_.AccessRights -match "FullAccess" -and -not $_.IsInherited } |
+  Format-Table User, AccessRights -Auto</pre>
+
+<p>Run that across sensitive mailboxes (executives, HR, legal, finance) periodically. Standing Full Access grants that outlived their reason are exactly the kind of quiet exposure that turns into an incident when the wrong account is compromised.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Access to someone's mailbox is access to their identity's inbox</h3>
+    <p>Full Access lets the delegate read everything, including password-reset and MFA-enrollment mails. A forgotten grant on a privileged user's mailbox is a lateral-movement gift. Removal isn't housekeeping — it's containment.</p>
+  </div>
+</div>
+
+<div class="takeaway">
+  <p class="tag">The rule</p>
+  <p>Delegation is a loan, not a gift. <em>Grant it, use it, remove it</em> — in the same task — and audit for the ones that slipped through. The access you forget to remove is the access someone else eventually uses.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/exchange/recipients-in-exchange-online/manage-permissions-for-recipients">Manage permissions for recipients — Microsoft Learn</a><span>Full Access, Send As, auto-mapping</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/powershell/module/exchange/add-mailboxpermission">Add-MailboxPermission — Microsoft Learn</a><span>the grant/remove cmdlets and parameters</span></li>
+</ul>
+</div>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/exchange/">Exchange</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>

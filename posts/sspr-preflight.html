@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SSPR without locking everyone out: the pre-flight checks that matter — Blue Team of One</title>
+<meta name="description" content="Self-service password reset and MFA can lock out an entire tenant if you enable them against raw objects. How the tech is backed, exactly what to verify first, and what breaks when you skip the checks.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=15">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/email/">Email</a>
+      <a href="/identity/" aria-current="page">Identity</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud-ir/">Cloud &amp; IR</a>
+      <a href="/about.html">About</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/identity/">Identity &amp; Access</a><span class="sep">›</span><a href="/identity/auth-mfa.html">Authentication &amp; MFA</a></p>
+    <p class="eyebrow"><span class="dot"></span>Deep dive · SSPR &amp; MFA</p>
+    <h1>SSPR without <em>locking everyone out</em></h1>
+    <p class="lede">Self-service password reset and MFA are safety features that can themselves lock out an entire tenant if you flip them on against raw objects. Here's how the technology is actually backed, exactly what to verify before you enable it, and what breaks when you skip the checks.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 12, 2026</span>
+      <span>~13 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>Enabling self-service password reset looks like a one-switch job. It is not. A tenant is never a clean list of people — it's a pile of humans, service accounts, shared mailboxes, guests, licensing edge cases and long-dead objects, and each of those categories fails SSPR (and MFA enforcement) in its own specific way. Flip the switch against the raw population and you don't get self-service; you get a help-desk flood, broken automations, and a handful of people who genuinely cannot get back in.</p>
+
+<p>The actual engineering work isn't the toggle. It's the <strong>pre-flight</strong>: understanding what the feature is built on, refining the raw tenant down to the population that can safely use it, and knowing — in advance — every way it breaks if you don't. This post is that pre-flight.</p>
+
+<h2 class="head"><span class="num">01</span>What SSPR and MFA are actually built on</h2>
+<p class="sub">Both ride the same registered-methods backbone. Understand that and the failure modes become obvious.</p>
+
+<p>The single most important concept is that <strong>MFA and SSPR share one thing: the user's registered authentication methods.</strong> A method (Authenticator push, phone, FIDO2 key, etc.) is registered once and both features draw on it. That's why "we've done MFA, so SSPR is easy" is a trap — registering a method for MFA does <em>not</em> mean the user has enough methods, of the right kind, to complete a password reset.</p>
+
+<p>Three distinctions do most of the damage when they're misunderstood:</p>
+
+<table class="cmp">
+  <tr><th>Concept</th><th>What it actually means</th><th>The trap</th></tr>
+  <tr><td>SSPR enabled</td><td>The tenant/group policy permits this user to use SSPR</td><td>Enabled ≠ able. A permitted user with no registered methods still can't reset.</td></tr>
+  <tr><td>SSPR registered</td><td>The user has completed registration with enough methods to satisfy the reset policy</td><td>Most users are MFA-registered but <em>not</em> SSPR-registered — a different, higher bar.</td></tr>
+  <tr><td>Methods required</td><td>How many methods the reset policy demands (usually two)</td><td>A user with a single method can authenticate for MFA but can't meet a two-method reset.</td></tr>
+</table>
+
+<p>For hybrid tenants there's a fourth pillar: <strong>password writeback</strong>. When a user resets in the cloud, the new password has to flow back to on-prem Active Directory through Entra Connect. If that path isn't healthy, the cloud reports success while the on-prem password never changes — one of the nastiest silent failures in the whole feature, covered in §05.</p>
+
+<h2 class="head"><span class="num">02</span>A raw tenant is not your rollout population</h2>
+<p class="sub">Refine before you enable. The object count and the human count are wildly different numbers.</p>
+
+<p>The first real task is subtraction. The tenant's total user-object count is meaningless for rollout planning because most of those objects aren't people who reset passwords. You have to filter down to the population that <em>should</em> be in scope, and the removed categories are exactly the ones that break loudly if you leave them in.</p>
+
+<figure>
+<svg viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A funnel: all user objects, minus service and app accounts, minus sign-in-enabled shared mailboxes, minus guests, stale and disabled objects, leaving the real human population, of which only a subset is ready to enable.">
+<text x="360" y="22" text-anchor="middle" font-family="Space Grotesk,sans-serif" font-size="14" font-weight="600" fill="#0E1521">Refining a raw tenant into a rollout population</text>
+<g font-family="IBM Plex Sans,sans-serif">
+  <rect x="40" y="40" width="640" height="42" rx="8" fill="#EEF1F5" stroke="#8A93A1" stroke-width="1"/>
+  <text x="58" y="66" font-size="12.5" font-weight="600" fill="#0E1521">All Entra user objects</text>
+  <text x="662" y="66" text-anchor="end" font-family="IBM Plex Mono,monospace" font-size="12" fill="#5A6472">~1,600</text>
+
+  <rect x="90" y="96" width="540" height="40" rx="8" fill="#FBF1DC" stroke="#B0700C" stroke-width="1"/>
+  <text x="108" y="121" font-size="12" fill="#6B430A">− service / app / automation accounts</text>
+
+  <rect x="135" y="150" width="450" height="40" rx="8" fill="#FBF1DC" stroke="#B0700C" stroke-width="1"/>
+  <text x="153" y="175" font-size="12" fill="#6B430A">− shared mailboxes with sign-in enabled</text>
+
+  <rect x="180" y="204" width="360" height="40" rx="8" fill="#FBF1DC" stroke="#B0700C" stroke-width="1"/>
+  <text x="198" y="229" font-size="12" fill="#6B430A">− guests · stale · disabled objects</text>
+
+  <rect x="220" y="258" width="280" height="42" rx="8" fill="#E1F0EB" stroke="#0F6E56" stroke-width="1"/>
+  <text x="238" y="284" font-size="12.5" font-weight="600" fill="#0B4A3A">Real human population</text>
+  <text x="482" y="284" text-anchor="end" font-family="IBM Plex Mono,monospace" font-size="12" fill="#0F6E56">~330</text>
+
+  <rect x="260" y="314" width="200" height="40" rx="8" fill="#EDF3E0" stroke="#3B6D11" stroke-width="1"/>
+  <text x="278" y="339" font-size="12" font-weight="600" fill="#274F0A">Ready to enable</text>
+  <text x="442" y="339" text-anchor="end" font-family="IBM Plex Mono,monospace" font-size="11.5" fill="#3B6D11">a handful</text>
+</g>
+</svg>
+<figcaption><b>The readiness funnel.</b> Object count is not human count, and human count is not ready count. Each subtracted band is a category that fails SSPR differently — which is why the filtering <em>is</em> the safety work, not a preliminary to it. (Numbers illustrative.)</figcaption>
+</figure>
+
+<p>Classifying service and non-human accounts is mostly keyword and behaviour analysis (naming patterns, no interactive sign-ins, app/automation ownership), then human validation of the edge cases. Shared mailboxes should not have interactive sign-in at all; any that do are a finding in their own right. Guests, stale objects (no sign-in in months) and disabled accounts all drop out. What remains is the population you actually plan against.</p>
+
+<h2 class="head"><span class="num">03</span>The pre-flight checks</h2>
+<p class="sub">Verify every one of these before you enable anything.</p>
+
+<table class="cmp">
+  <tr><th>Check</th><th>Why it matters</th><th>If you skip it</th></tr>
+  <tr><td>Human vs. non-human classification</td><td>Service/app accounts shouldn't be reset-eligible</td><td>Automations get MFA/SSPR prompts and break</td></tr>
+  <tr><td>Shared-mailbox sign-in disabled</td><td>Shared mailboxes are accessed via delegation, not sign-in</td><td>They get swept into enforcement and flagged</td></tr>
+  <tr><td>Methods registered ≥ policy minimum</td><td>Reset usually needs two methods</td><td>Single-method users can't complete a reset</td></tr>
+  <tr><td>SSPR-registered, not just MFA-registered</td><td>Different, higher bar than MFA</td><td>Users "enabled" for SSPR still can't use it</td></tr>
+  <tr><td>Password writeback healthy (hybrid)</td><td>Cloud reset must reach on-prem AD</td><td>Reset "succeeds" but the AD password never changes</td></tr>
+  <tr><td>Licensing coverage</td><td>SSPR/registration needs the right SKU</td><td>Unlicensed users silently excluded</td></tr>
+  <tr><td>Risk-policy interaction</td><td>Risk-based policies can block mid-reset</td><td>A risky sign-in blocks the very reset meant to recover it</td></tr>
+</table>
+
+<h2 class="head"><span class="num">04</span>What goes wrong when you don't check</h2>
+<p class="sub">The whole reason the pre-flight exists. Each of these is a real failure mode.</p>
+
+<p><strong>The service-account blast radius.</strong> Enforce MFA or enable SSPR tenant-wide and every service, app-integration, and automation account is suddenly expected to have a human's authentication methods. They don't. The account can't satisfy the prompt, the automation that runs under it fails, and you've turned a security improvement into an outage. This is why non-human classification is the <em>first</em> check, not a nice-to-have.</p>
+
+<p><strong>Shared mailboxes with sign-in on.</strong> A shared mailbox is meant to be reached through delegation, with its underlying account sign-in disabled. When it isn't, enforcement treats it like a user — and now you're trying to register MFA methods for a mailbox nobody logs into directly. Every one you find is also a small security finding: an enabled sign-in on a shared mailbox is an account that shouldn't be directly authenticable at all.</p>
+
+<p><strong>Single-method users.</strong> The most common individual failure. A user registered one method for MFA, everyone assumed they were "done," and then a two-method reset policy leaves them unable to complete SSPR at the exact moment they need it — locked out, on the phone to the help desk, which defeats the entire point of <em>self</em>-service.</p>
+
+<div class="analogy">
+  <p class="tag">The distinction that bites hardest</p>
+  <p><strong>SSPR-enabled is a permission; SSPR-registered is a capability.</strong> A report showing "98% enabled" tells you nothing about whether those people can actually reset. Registration — enough methods, of the right kind — is the number that matters. Confusing the two is how rollouts get greenlit and then fail on contact with real users.</p>
+</div>
+
+<p><strong>MFA enforced before registration.</strong> Order matters. Enforce MFA on a population that hasn't registered methods yet and you hard-lock the unregistered — they can't sign in to register because they're being blocked for not having registered. Registration must lead enforcement, always, ideally with a registration campaign and a grace window first.</p>
+
+<h2 class="head"><span class="num">05</span>The reset flow — and where it silently fails</h2>
+<p class="sub">In hybrid tenants, "reset succeeded" and "the password actually changed" are two different claims.</p>
+
+<figure>
+<svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The SSPR reset flow: user requests reset, Entra verifies registered methods, user proves methods, new password is set in Entra, then written back via Entra Connect to on-prem AD. If writeback is misconfigured, Entra reports success but AD never updates.">
+<defs><marker id="s1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#8A93A1" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<g font-family="IBM Plex Sans,sans-serif">
+  <rect x="8" y="34" width="110" height="50" rx="10" fill="#E6F1FB" stroke="#1A69B8" stroke-width="1"/>
+  <text x="63" y="55" text-anchor="middle" font-size="11" font-weight="600" fill="#0C447C">User: reset</text>
+  <text x="63" y="70" text-anchor="middle" font-size="9" fill="#5A6472">"forgot password"</text>
+  <line x1="118" y1="59" x2="132" y2="59" stroke="#8A93A1" stroke-width="1.3" marker-end="url(#s1)"/>
+  <rect x="132" y="34" width="110" height="50" rx="10" fill="#ECEAFB" stroke="#5147C9" stroke-width="1"/>
+  <text x="187" y="55" text-anchor="middle" font-size="11" font-weight="600" fill="#332B86">Verify methods</text>
+  <text x="187" y="70" text-anchor="middle" font-size="9" fill="#5A6472">registered?</text>
+  <line x1="242" y1="59" x2="256" y2="59" stroke="#8A93A1" stroke-width="1.3" marker-end="url(#s1)"/>
+  <rect x="256" y="34" width="110" height="50" rx="10" fill="#ECEAFB" stroke="#5147C9" stroke-width="1"/>
+  <text x="311" y="55" text-anchor="middle" font-size="11" font-weight="600" fill="#332B86">Prove 1–2</text>
+  <text x="311" y="70" text-anchor="middle" font-size="9" fill="#5A6472">methods</text>
+  <line x1="366" y1="59" x2="380" y2="59" stroke="#8A93A1" stroke-width="1.3" marker-end="url(#s1)"/>
+  <rect x="380" y="34" width="110" height="50" rx="10" fill="#E1F0EB" stroke="#0F6E56" stroke-width="1"/>
+  <text x="435" y="55" text-anchor="middle" font-size="11" font-weight="600" fill="#0B4A3A">Set in Entra</text>
+  <text x="435" y="70" text-anchor="middle" font-size="9" fill="#5A6472">cloud password</text>
+  <line x1="490" y1="59" x2="504" y2="59" stroke="#8A93A1" stroke-width="1.3" marker-end="url(#s1)"/>
+  <rect x="504" y="34" width="110" height="50" rx="10" fill="#FBF1DC" stroke="#B0700C" stroke-width="1.4"/>
+  <text x="559" y="55" text-anchor="middle" font-size="11" font-weight="600" fill="#6B430A">Writeback</text>
+  <text x="559" y="70" text-anchor="middle" font-size="9" fill="#5A6472">Entra Connect</text>
+  <line x1="614" y1="59" x2="628" y2="59" stroke="#8A93A1" stroke-width="1.3" marker-end="url(#s1)"/>
+  <rect x="628" y="34" width="84" height="50" rx="10" fill="#EDF3E0" stroke="#3B6D11" stroke-width="1"/>
+  <text x="670" y="55" text-anchor="middle" font-size="11" font-weight="600" fill="#274F0A">On-prem AD</text>
+  <text x="670" y="70" text-anchor="middle" font-size="9" fill="#5A6472">updated</text>
+
+  <rect x="360" y="112" width="352" height="86" rx="12" fill="#FBE9E9" stroke="#EBC9C9" stroke-width="1"/>
+  <text x="380" y="136" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="#7A1F1F" font-weight="500">THE SILENT FAILURE</text>
+  <text x="380" y="158" font-size="12" fill="#5A2020">If writeback is misconfigured, or the connector account lacks</text>
+  <text x="380" y="175" font-size="12" fill="#5A2020">reset permission on the OU, Entra shows the reset as <tspan font-weight="600">succeeded</tspan></text>
+  <text x="380" y="192" font-size="12" fill="#5A2020">— but the on-prem password never changes. The user is still locked out.</text>
+  <line x1="559" y1="84" x2="536" y2="112" stroke="#A32D2D" stroke-width="1.2" stroke-dasharray="3 3"/>
+</g>
+</svg>
+<figcaption><b>Where "success" lies.</b> The cloud half of the reset can complete perfectly while the writeback half fails silently. In a hybrid tenant, validating writeback health — connector permissions, OU reset rights, sync status — is not optional; it's the difference between a working reset and a false green light.</figcaption>
+</figure>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Risk policies can block the recovery they're meant to enable</h3>
+    <p>If a user's session is flagged risky, a risk-based Conditional Access policy may block sign-in — including the SSPR flow that would let them recover. Map how your risk policies interact with SSPR before enabling both, or a locked-out user in a "risky" state has no self-service path back and lands straight on the help desk.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">06</span>The safe rollout sequence</h2>
+<p class="sub">Never big-bang. Classify, validate, pilot, expand, enforce.</p>
+
+<p>Everything above resolves into an order of operations. <strong>Classify</strong> the tenant into humans vs. service vs. shared vs. stale. <strong>Refine</strong> to the real human population. <strong>Validate a small pilot</strong> of users who are genuinely ready — methods registered, writeback confirmed working for them — and prove the end-to-end reset actually changes the on-prem password. Run a <strong>registration campaign</strong> so the wider population gets enough methods <em>before</em> any enforcement. <strong>Expand in controlled waves</strong>, watching help-desk volume as your signal. Only then <strong>enforce</strong>. Each step is reversible; a big-bang enablement is not.</p>
+
+<div class="takeaway">
+  <p class="tag">The principle</p>
+  <p>SSPR and MFA don't fail on the toggle — they fail on the <em>assumptions</em> underneath it. Refine the population, verify registration and writeback for real, and lead with registration before enforcement. The rollout you can <em>reverse</em> is the rollout that won't lock anyone out.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/authentication/concept-sspr-howitworks">How SSPR works — Microsoft Learn</a><span>methods, policy, and password writeback</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/authentication/tutorial-enable-sspr-writeback">Enable password writeback — Microsoft Learn</a><span>the hybrid writeback path and permissions</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/authentication/concept-registration-mfa-sspr-combined">Combined MFA and SSPR registration</a><span>the shared registration backbone</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-conditional-access-policy-common">Conditional Access &amp; risk policies</a><span>how risk interacts with sign-in and recovery</span></li>
+</ul>
+</div>
+
+</div>
+</article>
+
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/identity/">Identity</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>
