@@ -246,20 +246,31 @@ noscript .sw-panel{display:block; border-bottom:1px solid var(--line); padding-b
 }
 
 
-/* ---- Homepage hero band (v13 — properly sized) ---- */
-.home-hero{display:grid; grid-template-columns:1.05fr .95fr; gap:40px; align-items:center; margin:6px 0 10px}
-.home-hero .phead{margin:0; text-align:left}
-.home-hero-art{width:100%; max-width:360px; justify-self:end; border-radius:20px; overflow:hidden; box-shadow:0 14px 40px rgba(16,21,33,.18); border:1px solid var(--line); aspect-ratio:1/1; background:var(--card)}
-.home-hero-art img{width:100%; height:100%; object-fit:cover; display:block}
 @media (max-width:860px){
-  .home-hero{grid-template-columns:1fr; gap:22px; justify-items:center; text-align:center}
-  .home-hero .phead{text-align:center}
-  .home-hero-art{max-width:300px; order:-1; justify-self:center}
 }
 @media (max-width:480px){
-  .home-hero-art{max-width:240px}
 }
 
-/* WebP picture fills the hero frame */
+
+
+/* ---- Homepage hero (v16 — text-forward, smaller art) ---- */
+.home-hero{display:grid; grid-template-columns:1.35fr 1fr; gap:52px; align-items:center; margin:10px 0 6px}
+.home-hero .phead{margin:0; text-align:left}
+.home-hero h1{margin:6px 0 0}
+.home-hero .accent-rule{width:44px; height:3px; border-radius:2px; background:var(--teal); margin:0 0 16px}
+.home-hero .tagline{max-width:34ch}
+.hero-chips{display:flex; flex-wrap:wrap; gap:8px; margin-top:22px}
+.hero-chip{font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.02em; color:var(--ink-2); background:var(--card); border:1px solid var(--line); border-radius:20px; padding:6px 12px}
+.hero-chip b{color:var(--ink); font-weight:600}
+.home-hero-art{width:100%; max-width:300px; justify-self:end; border-radius:20px; overflow:hidden; box-shadow:0 14px 40px rgba(16,21,33,.16); border:1px solid var(--line); aspect-ratio:1/1; background:var(--card)}
 .home-hero-art picture{display:block; width:100%; height:100%}
-.home-hero-art picture img{width:100%; height:100%; object-fit:cover; display:block}
+.home-hero-art img{width:100%; height:100%; object-fit:cover; display:block}
+@media (max-width:860px){
+  .home-hero{grid-template-columns:1fr; gap:24px; justify-items:center; text-align:center}
+  .home-hero .phead{text-align:center}
+  .home-hero .accent-rule{margin-left:auto; margin-right:auto}
+  .home-hero .tagline{max-width:46ch}
+  .hero-chips{justify-content:center}
+  .home-hero-art{max-width:260px; order:-1}
+}
+@media (max-width:480px){ .home-hero-art{max-width:220px} }
