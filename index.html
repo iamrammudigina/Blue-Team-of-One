@@ -4,13 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Blue Team of One — Security field notes</title>
-<meta name="description" content="Practitioner security field notes, organized by vertical.">
+<meta name="description" content="Practitioner security field notes by Ram Mudigina — detection engineering, identity hardening, incident response, and eDiscovery.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/style.css?v=17">
+<link rel="stylesheet" href="/assets/style.css?v=18">
 </head>
 <body>
+
 <header class="site-head">
   <div class="site-head-inner">
     <a class="masthead" href="/">
@@ -29,74 +30,202 @@
     </nav>
   </div>
 </header>
+
 <main>
   <div class="wrap">
-    <div class="home-hero">
-      <div class="phead">
-        <p class="kicker">Blue Team of One</p>
-        <div class="accent-rule"></div>
-        <h1>Security field notes</h1>
-        <p class="tagline">Deep teardowns and quick lessons from real defensive work by Ram Mudigina. Pick a vertical to dive in.</p>
-        <div class="hero-chips">
-          <span class="hero-chip"><b>12</b> field notes</span>
-          <span class="hero-chip">Identity &amp; access</span>
-          <span class="hero-chip">Detection &amp; IR</span>
-          <span class="hero-chip">eDiscovery &amp; holds</span>
+    <div class="li-grid">
+      <aside class="li-left">
+        <div class="li-card">
+          <div class="pc-cover"><img src="/assets/img/hero.webp?v=4" alt=""></div>
+          <div class="pc-body">
+            <img class="pc-avatar" src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+            <p class="pc-name">Ram Mudigina <svg class="chk" width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="currentColor" opacity=".14"/><path d="M8 12.5l2.5 2.5L16 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></p>
+            <p class="pc-title">Security Lead @ Surya Technologies</p>
+            <p class="pc-head">Detection engineering · identity hardening · incident response across multi-tenant environments.</p>
+            <p class="pc-loc">Bengaluru, India</p>
+            <div class="pc-div"></div>
+            <div class="pc-stats">
+              <div class="pc-stat"><b>12</b> field notes</div>
+              <div class="pc-stat"><b>5</b> verticals</div>
+            </div>
+            <div class="pc-links">
+              <a href="https://www.linkedin.com/in/ram-mudigina/"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M6.94 5a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM3 8.5h3.9V21H3V8.5zM9.5 8.5h3.7v1.7h.05c.52-.93 1.8-1.9 3.7-1.9 3.95 0 4.68 2.4 4.68 5.5V21h-3.9v-5.4c0-1.3 0-3-1.8-3s-2.1 1.4-2.1 2.9V21H9.5V8.5z"/></svg> LinkedIn profile</a>
+              <a href="/about.html"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01" stroke-linecap="round"/></svg> About this site</a>
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="home-hero-art">
-        <picture>
-          <source srcset="/assets/img/hero.webp?v=4" type="image/webp">
-          <img src="/assets/img/hero.png?v=4" alt="Blue Team of One — security field notes" width="800" height="800" loading="eager">
-        </picture>
-      </div>
-    </div>
-    <div class="tiles">
-      <a class="tile t-sky" href="/email/">
-        <svg class="t-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
-        <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 7.5l9 6 9-6"/></svg></span>
-        <h2>Email</h2>
-        <p>Mail flow, deliverability, and the spam war in both directions.</p>
-        <div class="t-meta"><span class="live">2 posts</span> · 3 sections</div>
+        <div class="li-card nav-card">
+          <h4>Browse verticals</h4>
+        <a href="/email/">Email<span class="c">2</span></a>
+        <a href="/identity/">Identity & Access<span class="c">3</span></a>
+        <a href="/detection/">Detection Engineering<span class="c">—</span></a>
+        <a href="/cloud-ir/">Cloud, Endpoint & IR<span class="c">3</span></a>
+        <a href="/exchange/">Exchange Admin<span class="c">1</span></a>
+        <a href="/legal/">Legal & eDiscovery<span class="c">3</span></a>
+        </div>
+      </aside>
+      <section class="li-center">
+        <div class="feed-head">
+          <h2>Latest field notes</h2>
+          <span>newest first</span>
+        </div>
+        <div class="feed">
+      <a class="fcard" href="/posts/aitm-account-takeover.html">
+        <span class="fc-cat">Cloud, Endpoint & IR › Incident response</span>
+        <h3 class="fc-title">The iPhone she never owned</h3>
+        <p class="fc-ex">A business email compromise, read backwards. The clearest evidence wasn't the foreign sign-in or the hidden inbox rule — it was an MFA device the user swore she'd never enrolled. Attacker-registered auth methods are the fingerprint of a token-theft takeover, and the order you contain them in matters.</p>
+        <div class="fc-by">
+          <img src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+          <span class="n">Ram Mudigina</span>
+          <span class="d">· Aug 13, 2026 · 9 min</span>
+          <span class="more">Read →</span>
+        </div>
       </a>
-      <a class="tile t-indigo" href="/identity/">
-        <svg class="t-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
-        <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4.2"/><path d="M11 11l7 7v3h-3l-1-1h-2v-2h-2l-1-1"/></svg></span>
-        <h2>Identity &amp; Access</h2>
-        <p>Tokens, Conditional Access, and proving who is really signing in.</p>
-        <div class="t-meta"><span class="live">3 posts</span> · 3 sections</div>
+      <a class="fcard" href="/posts/scareware-wildcard-bypass.html">
+        <span class="fc-cat">Cloud, Endpoint & IR › Incident response</span>
+        <h3 class="fc-title">The scareware that walked through your allow-list</h3>
+        <p class="fc-ex">A user hit a full-screen "virus alert" with a fake support number. Textbook scareware — except it was hosted on a Microsoft cloud domain, and the corporate web proxy waved it straight through. The scam wasn't the story. The wildcard allow-rule that let it in was.</p>
+        <div class="fc-by">
+          <img src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+          <span class="n">Ram Mudigina</span>
+          <span class="d">· Aug 13, 2026 · 8 min</span>
+          <span class="more">Read →</span>
+        </div>
       </a>
-      <a class="tile t-teal" href="/detection/">
-        <svg class="t-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
-        <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-6 4 12 2-6h4"/></svg></span>
-        <h2>Detection Engineering</h2>
-        <p>Turning telemetry into signal — rule design, tuning, and correlation.</p>
-        <div class="t-meta">3 sections · coming soon</div>
+      <a class="fcard" href="/posts/clickfix-endpoint-remediation.html">
+        <span class="fc-cat">Cloud, Endpoint & IR › Endpoint</span>
+        <h3 class="fc-title">ClickFix: the attack that makes the victim run the malware</h3>
+        <p class="fc-ex">A "verify you're human" page that quietly tells the user to paste a command into the Windows Run box. The endpoint cleanup is the easy half — the registry key that records exactly what they pasted is the forensic gold most people never check, and the identity usually lives in more than one place.</p>
+        <div class="fc-by">
+          <img src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+          <span class="n">Ram Mudigina</span>
+          <span class="d">· Aug 13, 2026 · 9 min</span>
+          <span class="more">Read →</span>
+        </div>
       </a>
-      <a class="tile t-amber" href="/cloud-ir/">
-        <svg class="t-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
-        <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></span>
-        <h2>Cloud, Endpoint &amp; IR</h2>
-        <p>Hardening the estate and running the response when it matters.</p>
-        <div class="t-meta"><span class="live">3 posts</span> · 3 sections</div>
+      <a class="fcard" href="/posts/phishing-trusted-sender.html">
+        <span class="fc-cat">Email › Inbound security</span>
+        <h3 class="fc-title">When the sender is real and the email still isn't</h3>
+        <p class="fc-ex">A phishing wave that arrived from a genuine, trusted client mailbox — so it passed every authentication check — then laundered its reputation through a legitimate SaaS host on the way to a fake Microsoft login. Sender trust is not email trust, and this is why.</p>
+        <div class="fc-by">
+          <img src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+          <span class="n">Ram Mudigina</span>
+          <span class="d">· Aug 13, 2026 · 8 min</span>
+          <span class="more">Read →</span>
+        </div>
       </a>
-      <a class="tile t-cyan" href="/exchange/">
-        <svg class="t-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
-        <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l3-8h12l3 8M3 13v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5M3 13h5l1.5 2h5L20 13"/></svg></span>
-        <h2>Exchange Administration</h2>
-        <p>Day-to-day Exchange Online operations — mailbox access, recovery, health, and the PowerShell that runs it all.</p>
-        <div class="t-meta"><span class="live">1 post</span> · 4 sections</div>
+      <a class="fcard" href="/posts/onedrive-archive-recovery.html">
+        <span class="fc-cat">Legal, eDiscovery & Holds › OneDrive & SharePoint preservation</span>
+        <h3 class="fc-title">The archived OneDrive and the billing trap</h3>
+        <p class="fc-ex">A departed employee's 400 GB OneDrive gets auto-archived. Months later, someone needs one billing spreadsheet out of it. The "simple" reactivation can quietly switch on a tenant-wide recurring charge across every unlicensed OneDrive you own — here's how to get the data back without the surprise bill.</p>
+        <div class="fc-by">
+          <img src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+          <span class="n">Ram Mudigina</span>
+          <span class="d">· Aug 13, 2026 · 9 min</span>
+          <span class="more">Read →</span>
+        </div>
       </a>
-      <a class="tile t-rose" href="/legal/">
-        <svg class="t-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
-        <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M7 21h10M4 8h16M12 3l-8 5m8-5l8 5M4 8l-2 5a3 3 0 0 0 6 0L4 8zm16 0l-2 5a3 3 0 0 0 6 0L20 8z"/></svg></span>
-        <h2>Legal, eDiscovery &amp; Holds</h2>
-        <p>Legal preservation and discovery — litigation holds, eDiscovery, content search, and the operational incidents that holds quietly cause downstream.</p>
-        <div class="t-meta"><span class="live">3 posts</span> · 5 sections</div>
+      <a class="fcard" href="/posts/ediscovery-hard-cases.html">
+        <span class="fc-cat">Legal, eDiscovery & Holds › eDiscovery hard cases</span>
+        <h3 class="fc-title">Legal requests: the hard cases</h3>
+        <p class="fc-ex">Twelve real legal-hold and eDiscovery scenarios in one runbook — placing, releasing, and searching across active, inactive, soft-deleted, and purged mailboxes, plus the orphaned-hold trap. Pick the scenario that matches yours; every command is copy-ready.</p>
+        <div class="fc-by">
+          <img src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+          <span class="n">Ram Mudigina</span>
+          <span class="d">· Aug 12, 2026 · 20 min</span>
+          <span class="more">Read →</span>
+        </div>
       </a>
+      <a class="fcard" href="/posts/litigation-hold-processing.html">
+        <span class="fc-cat">Legal, eDiscovery & Holds › Litigation holds</span>
+        <h3 class="fc-title">Processing a litigation hold end to end</h3>
+        <p class="fc-ex">A legal hold looks like a single command. In practice the hard part is the target's mailbox status — active, inactive, soft-deleted, or purged — because each one needs a completely different approach, and reaching for the wrong one means unrecoverable data loss and legal exposure.</p>
+        <div class="fc-by">
+          <img src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+          <span class="n">Ram Mudigina</span>
+          <span class="d">· Aug 12, 2026 · 12 min</span>
+          <span class="more">Read →</span>
+        </div>
+      </a>
+      <a class="fcard" href="/posts/sspr-preflight.html">
+        <span class="fc-cat">Identity & Access › Authentication & MFA</span>
+        <h3 class="fc-title">SSPR without locking everyone out</h3>
+        <p class="fc-ex">Self-service password reset and MFA are safety features that can themselves lock out an entire tenant if you flip them on against raw objects. Here's how the technology is actually backed, exactly what to verify before you enable it, and what breaks when you skip the checks.</p>
+        <div class="fc-by">
+          <img src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+          <span class="n">Ram Mudigina</span>
+          <span class="d">· Aug 12, 2026 · 13 min</span>
+          <span class="more">Read →</span>
+        </div>
+      </a>
+      <a class="fcard" href="/posts/travel-geofencing.html">
+        <span class="fc-cat">Identity & Access › Conditional Access</span>
+        <h3 class="fc-title">Geo-fencing that lets people travel</h3>
+        <p class="fc-ex">Country-based Conditional Access blocks are one of the cheapest strong controls you can deploy — until an exec lands abroad and can't sign in. Here are two ways to automate temporary, self-service, auto-reverting travel exclusions with Power Automate and Microsoft Graph.</p>
+        <div class="fc-by">
+          <img src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+          <span class="n">Ram Mudigina</span>
+          <span class="d">· Aug 12, 2026 · 11 min</span>
+          <span class="more">Read →</span>
+        </div>
+      </a>
+      <a class="fcard" href="/posts/delegated-mailbox-access.html">
+        <span class="fc-cat">Exchange Administration › Mailbox access & delegation</span>
+        <h3 class="fc-title">Reading another mailbox without leaving the door open</h3>
+        <p class="fc-ex">Granting yourself Full Access to someone else's mailbox takes thirty seconds. The step everyone forgets is taking it away again — and that leftover delegation is a standing security gap auditors love to find.</p>
+        <div class="fc-by">
+          <img src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+          <span class="n">Ram Mudigina</span>
+          <span class="d">· Aug 12, 2026 · 4 min</span>
+          <span class="more">Read →</span>
+        </div>
+      </a>
+      <a class="fcard" href="/posts/email-delivery.html">
+        <span class="fc-cat">Email › Delivery & mail flow</span>
+        <h3 class="fc-title">The bounce that lied: when "Delivered" isn't delivered</h3>
+        <p class="fc-ex">A user's mail to a client kept bouncing — while every trace on our side showed the message as Delivered. Here's the full anatomy of how email actually travels, and the one habit that cracks these cases in about a minute.</p>
+        <div class="fc-by">
+          <img src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+          <span class="n">Ram Mudigina</span>
+          <span class="d">· Aug 12, 2026 · 10 min</span>
+          <span class="more">Read →</span>
+        </div>
+      </a>
+      <a class="fcard" href="/posts/token-protection.html">
+        <span class="fc-cat">Identity & Access › Token & session security</span>
+        <h3 class="fc-title">Why a stolen token dies on the wrong laptop</h3>
+        <p class="fc-ex">Token protection binds a sign-in session to the one device that can prove it holds a hardware-sealed key. Here's the actual cryptography underneath — and the handful of half-truths that make it confusing.</p>
+        <div class="fc-by">
+          <img src="/assets/img/ram.png?v=4" alt="Ram Mudigina">
+          <span class="n">Ram Mudigina</span>
+          <span class="d">· Aug 11, 2026 · 8 min</span>
+          <span class="more">Read →</span>
+        </div>
+      </a>
+        </div>
+      </section>
+      <aside class="li-right">
+        <div class="li-card side-card">
+          <h4>Blue Team of One</h4>
+          <p>Deep teardowns and quick lessons from real defensive work — the traps, the fixes, and the reasoning behind them.</p>
+          <a class="btn-li" href="https://www.linkedin.com/in/ram-mudigina/"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M6.94 5a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM3 8.5h3.9V21H3V8.5zM9.5 8.5h3.7v1.7h.05c.52-.93 1.8-1.9 3.7-1.9 3.95 0 4.68 2.4 4.68 5.5V21h-3.9v-5.4c0-1.3 0-3-1.8-3s-2.1 1.4-2.1 2.9V21H9.5V8.5z"/></svg> Follow on LinkedIn</a>
+        </div>
+        <div class="li-card side-card">
+          <h4>Topics</h4>
+          <div class="chips-mini">
+            <a href="/identity/">Identity</a>
+            <a href="/detection/">Detection</a>
+            <a href="/cloud-ir/">Incident response</a>
+            <a href="/legal/">eDiscovery</a>
+            <a href="/email/">Email security</a>
+            <a href="/exchange/">Exchange</a>
+          </div>
+        </div>
+      </aside>
     </div>
   </div>
 </main>
+
 <footer><div class="wrap">
   <span>© 2026 Ram Mudigina · Blue Team of One</span>
   <span><a href="/">Home</a> · <a href="/about.html">About</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>

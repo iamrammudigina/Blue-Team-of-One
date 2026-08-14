@@ -289,3 +289,63 @@ noscript .sw-panel{display:block; border-bottom:1px solid var(--line); padding-b
 .sresult p{color:var(--ink-2); font-size:14.5px; line-height:1.5; margin:6px 0 0}
 .sresult mark{background:#FBEEC2; color:inherit; padding:0 2px; border-radius:3px}
 .search-empty{color:var(--ink-3); text-align:center; padding:36px 10px; font-size:15px}
+
+/* ============ LinkedIn-inspired homepage (v18) ============ */
+.li-grid{display:grid; grid-template-columns:292px 1fr 288px; gap:24px; align-items:start; margin:6px 0 4px}
+@media(max-width:1120px){ .li-grid{grid-template-columns:280px 1fr} .li-right{display:none} }
+@media(max-width:800px){ .li-grid{grid-template-columns:1fr} .li-left,.li-right{position:static !important} }
+.li-left,.li-right{position:sticky; top:86px; display:flex; flex-direction:column; gap:16px}
+.li-card{background:var(--card); border:1px solid var(--line); border-radius:16px; overflow:hidden}
+
+/* profile card */
+.pc-cover{height:84px; background:#0E1521; overflow:hidden}
+.pc-cover img{width:100%; height:100%; object-fit:cover; object-position:center 30%}
+.pc-body{padding:0 18px 18px; margin-top:-36px}
+.pc-avatar{width:78px; height:78px; border-radius:50%; border:3px solid var(--card); object-fit:cover; box-shadow:0 3px 12px rgba(16,21,33,.18); background:var(--card); display:block}
+.pc-name{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:19px; color:var(--ink); margin:11px 0 0; display:flex; align-items:center; gap:6px; letter-spacing:-.01em}
+.pc-name .chk{color:var(--teal); flex:0 0 auto}
+.pc-title{color:var(--ink); font-size:13.5px; margin:4px 0 0; font-weight:500}
+.pc-head{color:var(--ink-2); font-size:12.5px; margin:7px 0 0; line-height:1.5}
+.pc-loc{color:var(--ink-3); font-size:11.5px; margin:9px 0 0; font-family:"IBM Plex Mono",monospace}
+.pc-div{height:1px; background:var(--line); margin:14px 0}
+.pc-stats{display:flex; gap:18px}
+.pc-stat{font-size:12.5px; color:var(--ink-3)}
+.pc-stat b{display:block; font-family:"Space Grotesk",sans-serif; font-size:17px; color:var(--ink); font-weight:600}
+.pc-links{display:flex; flex-direction:column; margin-top:14px; gap:1px}
+.pc-links a{display:flex; align-items:center; gap:9px; padding:8px 0; font-size:13px; color:var(--ink-2); text-decoration:none; border-radius:8px; transition:color .15s}
+.pc-links a:hover{color:var(--teal)}
+.pc-links svg{flex:0 0 auto; color:var(--ink-3)}
+
+/* browse-verticals card */
+.nav-card{padding:15px 16px}
+.nav-card h4{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-3); margin:0 0 8px}
+.nav-card a{display:flex; align-items:center; justify-content:space-between; padding:8px 0; font-size:13.5px; color:var(--ink); text-decoration:none; border-bottom:1px solid var(--line); transition:color .15s}
+.nav-card a:last-child{border-bottom:none}
+.nav-card a:hover{color:var(--teal)}
+.nav-card a .c{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-3)}
+
+/* feed */
+.feed-head{display:flex; justify-content:space-between; align-items:baseline; margin:4px 2px 14px}
+.feed-head h2{font-family:"Space Grotesk",sans-serif; font-size:20px; font-weight:600; color:var(--ink); margin:0; letter-spacing:-.01em}
+.feed-head span{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3)}
+.feed{display:flex; flex-direction:column; gap:14px}
+.fcard{display:block; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:20px 22px; text-decoration:none; transition:border-color .15s, transform .12s, box-shadow .15s}
+.fcard:hover{border-color:var(--line-2); transform:translateY(-1px); box-shadow:0 10px 30px rgba(16,21,33,.07)}
+.fc-cat{font-family:"IBM Plex Mono",monospace; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--teal)}
+.fc-title{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:20px; color:var(--ink); margin:6px 0 0; letter-spacing:-.01em; line-height:1.2}
+.fc-ex{color:var(--ink-2); font-size:14.5px; line-height:1.55; margin:8px 0 0}
+.fc-by{display:flex; align-items:center; gap:9px; margin-top:15px}
+.fc-by img{width:26px; height:26px; border-radius:50%; object-fit:cover}
+.fc-by .n{font-size:12.5px; color:var(--ink); font-weight:500}
+.fc-by .d{font-size:12px; color:var(--ink-3)}
+.fc-by .more{margin-left:auto; color:var(--teal); font-size:13px; font-weight:500}
+
+/* right rail */
+.side-card{padding:17px 18px}
+.side-card h4{font-family:"Space Grotesk",sans-serif; font-size:15px; font-weight:600; color:var(--ink); margin:0 0 8px}
+.side-card p{font-size:13px; color:var(--ink-2); line-height:1.55; margin:0 0 13px}
+.btn-li{display:inline-flex; align-items:center; gap:8px; background:var(--hero); color:#fff; font-size:13px; font-weight:500; padding:9px 15px; border-radius:10px; text-decoration:none; transition:opacity .15s}
+.btn-li:hover{opacity:.9}
+.chips-mini{display:flex; flex-wrap:wrap; gap:7px}
+.chips-mini a{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-2); background:var(--bg); border:1px solid var(--line); border-radius:20px; padding:5px 10px; text-decoration:none; transition:border-color .15s,color .15s}
+.chips-mini a:hover{border-color:var(--teal); color:var(--teal)}
