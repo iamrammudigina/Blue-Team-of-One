@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rotating every local admin password with Intune LAPS — Blue Team of One</title>
+<meta name="description" content="Deploying Windows LAPS through Intune — the concept, the prerequisites that trip people up, the configuration profile settings, how to read the check-in results, and how to diagnose and remediate the errors.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=22">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/" aria-current="page">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/endpoint/">Endpoint Security</a><span class="sep">›</span><a href="/endpoint/hardening.html">Hardening &amp; compliance</a></p>
+    <p class="eyebrow"><span class="dot"></span>Endpoint · hardening</p>
+    <h1>Rotating every local admin password <em>with Intune LAPS</em></h1>
+    <p class="lede">One shared local-admin password across the fleet is the gift that keeps giving to anyone doing lateral movement — crack or dump it once, own every machine. Windows LAPS gives each device its own rotating admin password, backed up where only the right people can read it. Here's the Intune deployment end to end, including how to read the results and fix the errors.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 14, 2026</span>
+      <span>~9 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>The classic lateral-movement enabler is a single local Administrator password reused across the estate. Dump it from one machine (or find it in a deployment script) and it works everywhere — no privilege escalation needed, just reuse. Windows LAPS (Local Administrator Password Solution) kills that by giving every device a <em>unique</em>, regularly rotated local-admin password, stored centrally so only authorised admins can retrieve it. Deployed through Intune, it applies to your whole managed fleet from one policy.</p>
+
+<h2 class="head"><span class="num">01</span>The concept</h2>
+<p class="sub">Unique password per device, rotated automatically, escrowed centrally.</p>
+
+<table class="cmp">
+  <tr><th>Piece</th><th>What it does</th></tr>
+  <tr><td><strong>Managed local admin</strong></td><td>A designated local administrator account whose password LAPS owns and rotates</td></tr>
+  <tr><td><strong>Rotation</strong></td><td>The password changes automatically on a schedule (and after each use, if configured)</td></tr>
+  <tr><td><strong>Backup directory</strong></td><td>The rotated password is escrowed to Entra ID (or on-prem AD), readable only by authorised roles</td></tr>
+  <tr><td><strong>Post-authentication action</strong></td><td>After the password is retrieved and used, LAPS can reset it again after a grace period</td></tr>
+</table>
+
+<div class="analogy">
+  <p class="tag">Why this shrinks the blast radius</p>
+  <p>With unique per-device passwords, compromising one local-admin credential buys the attacker exactly one machine — not the fleet. And because the password rotates (especially after use), even a retrieved password has a short useful life. You've turned a master key into a set of single-use keys.</p>
+</div>
+
+<h2 class="head"><span class="num">02</span>Prerequisites</h2>
+<p class="sub">Get these wrong and the policy applies but nothing is backed up.</p>
+
+<pre class="code"><span class="muted"># before the policy will actually work</span>
+- Windows 10/11 with current LAPS support (in-box on current builds)
+- Devices Entra joined or hybrid joined and enrolled in Intune
+- Entra ID LAPS ENABLED at the tenant level
+  (Entra admin center → Devices → Device settings → "Enable Entra Local
+   Administrator Password Solution (LAPS)" = Yes)
+- A local admin account for LAPS to manage (built-in or a named one)</pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>The tenant toggle is the one everyone forgets</h3>
+    <p>If <strong>Entra ID LAPS isn't enabled at the tenant level</strong>, the Intune policy still deploys and reports success on the <em>settings</em> — but the password has nowhere to be backed up to, so retrieval fails. Flip the tenant toggle <em>first</em>. Also make sure the account named in the policy actually exists as a local admin on the devices, or LAPS has nothing to manage.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">03</span>The configuration</h2>
+<p class="sub">A Windows device-configuration profile, assigned broadly.</p>
+
+<p>Create an Intune device configuration profile (Windows, LAPS category) and assign it — typically to <strong>All devices</strong>, since every managed machine benefits. The settings that matter, with sensible values:</p>
+
+<table class="cmp">
+  <tr><th>Setting</th><th>Value</th><th>Why</th></tr>
+  <tr><td>Backup Directory</td><td>Microsoft Entra ID only</td><td>Escrow the password to Entra for cloud-managed devices</td></tr>
+  <tr><td>Password Age Days</td><td>30</td><td>Rotate at least monthly</td></tr>
+  <tr><td>Administrator Account Name</td><td><em>a named local admin</em></td><td>The account LAPS manages (must exist locally)</td></tr>
+  <tr><td>Password Complexity</td><td>Upper + lower + numbers + symbols</td><td>Full character set</td></tr>
+  <tr><td>Password Length</td><td>14</td><td>Long enough to resist cracking</td></tr>
+  <tr><td>Post-Auth Actions</td><td>Reset on grace-period expiry</td><td>Rotate again after the password is used</td></tr>
+  <tr><td>Post-Auth Reset Delay</td><td>8 (hours)</td><td>Grace window before the post-use reset</td></tr>
+</table>
+
+<p>The post-authentication action is the underrated one: after someone retrieves and uses the password, LAPS resets it again once the grace delay expires — so a password pulled for a legitimate support task doesn't linger as a valid credential.</p>
+
+<h2 class="head"><span class="num">04</span>Reading the results</h2>
+<p class="sub">Check-in counts tell you coverage; retrieval proves it works.</p>
+
+<p>On the policy's overview, the <strong>device and user check-in status</strong> shows how many devices <span class="k">Succeeded</span> vs hit <span class="k">Error</span> or <span class="k">Conflict</span>. A large succeeded count with a small error count is the normal healthy picture. But the real proof isn't the count — it's <strong>retrieving a password</strong>: in the Entra admin center, open a device → <em>Local administrator password recovery</em>, and confirm a rotated password is present and readable. If devices show "succeeded" but no password is stored, that's the tenant-toggle prerequisite biting.</p>
+
+<h2 class="head"><span class="num">05</span>Failures &amp; remediation</h2>
+<p class="sub">The errors cluster into a handful of causes.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>What the errors usually mean</h3>
+    <p><strong>Backup fails / no password stored</strong> → Entra LAPS not enabled at tenant level, or the device isn't properly Entra/hybrid joined. <strong>Managed account not found</strong> → the account named in the policy doesn't exist locally; either point the policy at the built-in admin or create the named account. <strong>Conflict</strong> → another policy (or legacy on-prem GPO LAPS) is also configuring LAPS on the same devices; remove the duplicate. <strong>Stale "error" on a handful of devices</strong> → often offline / not-yet-checked-in machines; give them a sync (Company Portal → sync, or Intune → Sync) and re-evaluate before chasing it as a real fault.</p>
+  </div>
+</div>
+
+<p>Work the errors by grouping them: a <em>uniform</em> failure across all devices points at a prerequisite (tenant toggle, join state); a <em>scattered</em> handful of errors against a mostly-succeeded fleet is almost always device-specific (offline, stale, or a local account mismatch) and clears with a sync or a targeted fix.</p>
+
+<div class="takeaway">
+  <p class="tag">The takeaway</p>
+  <p>Intune LAPS replaces one reused local-admin password with a unique, auto-rotating one per device, escrowed to Entra where only authorised admins can read it — so one cracked credential no longer owns the fleet. Enable Entra LAPS at the tenant level <em>first</em> (the #1 gotcha), deploy the config profile to All devices, prove it by actually retrieving a password, and triage errors by whether they're uniform (a prerequisite) or scattered (device-specific).</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/windows-server/identity/laps/laps-overview">Windows LAPS overview — Microsoft Learn</a><span>the concept and architecture</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/mem/intune/protect/windows-laps-overview">Manage Windows LAPS with Intune</a><span>the policy settings and backup directory</span></li>
+  <li><a href="/posts/intune-hybrid-enrollment.html">Hybrid Intune auto-enrollment, end to end</a><span>getting devices managed in the first place</span></li>
+</ul>
+</div>
+
+<p class="disclaimer" style="color:var(--ink-3);font-size:13px;margin-top:28px">Anonymized from real deployment work; account and group names have been replaced with generic examples.</p>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/endpoint/">Endpoint</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>
