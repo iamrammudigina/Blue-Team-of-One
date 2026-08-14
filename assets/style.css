@@ -367,3 +367,7 @@ noscript .sw-panel{display:block; border-bottom:1px solid var(--line); padding-b
 .rn-item .c{font-family:"IBM Plex Mono",monospace; font-size:10px; letter-spacing:.05em; text-transform:uppercase; color:var(--teal)}
 .rn-item .t{display:block; font-size:13.5px; color:var(--ink); font-weight:500; margin-top:3px; line-height:1.35; transition:color .15s}
 .rn-item:hover .t{color:var(--teal)}
+
+/* ---- Hover lift/glow on side cards (v20) ---- */
+.li-left .li-card, .li-right .li-card{transition:transform .22s cubic-bezier(.2,.7,.3,1), box-shadow .22s, border-color .22s}
+.li-left .li-card:hover, .li-right .li-card:hover{transform:translateY(-3px); box-shadow:0 16px 40px rgba(16,21,33,.13); border-color:var(--line-2)}
