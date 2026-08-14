@@ -349,3 +349,21 @@ noscript .sw-panel{display:block; border-bottom:1px solid var(--line); padding-b
 .chips-mini{display:flex; flex-wrap:wrap; gap:7px}
 .chips-mini a{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-2); background:var(--bg); border:1px solid var(--line); border-radius:20px; padding:5px 10px; text-decoration:none; transition:border-color .15s,color .15s}
 .chips-mini a:hover{border-color:var(--teal); color:var(--teal)}
+
+/* ---- Center vertical tiles inside the LI layout (v19) ---- */
+.li-center .tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; margin:0}
+.li-center .tile{padding:22px 22px 20px; min-height:auto}
+.li-center .tile h2{font-size:21px}
+.li-center .tile p{font-size:13.5px}
+/* stronger Apple-style glow + lift on hover */
+.tile{transition:transform .22s cubic-bezier(.2,.7,.3,1), box-shadow .22s, border-color .22s}
+.tile:hover{transform:translateY(-4px); box-shadow:0 18px 44px rgba(16,21,33,.14)}
+.tile:hover .t-arrow{transform:translate(3px,-3px); opacity:1}
+.t-arrow{transition:transform .22s, opacity .22s; opacity:.5}
+/* recent-notes rail list */
+.rn-list{display:flex; flex-direction:column}
+.rn-item{display:block; padding:11px 0; border-bottom:1px solid var(--line); text-decoration:none}
+.rn-item:last-child{border-bottom:none}
+.rn-item .c{font-family:"IBM Plex Mono",monospace; font-size:10px; letter-spacing:.05em; text-transform:uppercase; color:var(--teal)}
+.rn-item .t{display:block; font-size:13.5px; color:var(--ink); font-weight:500; margin-top:3px; line-height:1.35; transition:color .15s}
+.rn-item:hover .t{color:var(--teal)}
