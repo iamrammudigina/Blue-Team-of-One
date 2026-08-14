@@ -371,3 +371,18 @@ noscript .sw-panel{display:block; border-bottom:1px solid var(--line); padding-b
 /* ---- Hover lift/glow on side cards (v20) ---- */
 .li-left .li-card, .li-right .li-card{transition:transform .22s cubic-bezier(.2,.7,.3,1), box-shadow .22s, border-color .22s}
 .li-left .li-card:hover, .li-right .li-card:hover{transform:translateY(-3px); box-shadow:0 16px 40px rgba(16,21,33,.13); border-color:var(--line-2)}
+
+/* ---- Correlation timeline + IR report template (v21) ---- */
+.xtimeline{border-left:2px solid var(--line); margin:22px 0 22px 6px; padding-left:0}
+.xrow{position:relative; padding:0 0 18px 26px}
+.xrow::before{content:""; position:absolute; left:-7px; top:3px; width:12px; height:12px; border-radius:50%; background:var(--card); border:2px solid var(--teal)}
+.xrow.warn::before{border-color:#B0700C} .xrow.bad::before{border-color:#A32D2D}
+.xrow .xt{font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--ink-3)}
+.xrow .xsrc{font-family:"IBM Plex Mono",monospace; font-size:10px; letter-spacing:.05em; text-transform:uppercase; color:var(--teal); margin-left:8px}
+.xrow.warn .xsrc{color:#B0700C} .xrow.bad .xsrc{color:#A32D2D}
+.xrow .xd{font-size:14px; color:var(--ink); margin:3px 0 0; line-height:1.5}
+.report{background:#0E1521; border-radius:14px; padding:22px 24px; margin:20px 0; color:#D4DAE4; font-family:"IBM Plex Mono",monospace; font-size:12.5px; line-height:1.7; overflow-x:auto}
+.report h4{font-family:"Space Grotesk",sans-serif; color:#fff; font-size:15px; margin:0 0 4px}
+.report .rlead{color:#8A93A1; font-size:12px; margin:0 0 16px; font-family:"IBM Plex Sans",sans-serif}
+.report pre{margin:0; white-space:pre-wrap; color:#C7D0DC}
+.report .k{color:#7fe3bf}

@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Investigating a phishing report with KQL, end to end — Blue Team of One</title>
+<meta name="description" content="A complete Defender Advanced Hunting playbook for phishing reports: 14 KQL checks across every email, identity, endpoint and cloud table, cross-signal correlation into one timeline, and a fill-in IR report template for fast assessment and human validation.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=21">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/ir/">Incident Response</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/detection/">Detection Engineering</a><span class="sep">›</span><a href="/detection/kql-hunting.html">Advanced hunting (KQL)</a></p>
+    <p class="eyebrow"><span class="dot"></span>Advanced hunting · investigation playbook</p>
+    <h1>Investigating a phishing report <em>with KQL, end to end</em></h1>
+    <p class="lede">A user reports a phishing email. That's the easy part. This is the complete Defender Advanced Hunting playbook — 14 queries across every email, identity, endpoint and cloud table, correlated into one timeline, plus a fill-in IR report template — that takes you from "someone reported a phish" to "the incident is closed and can't spread." No gaps.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 14, 2026</span>
+      <span>~26 min read · playbook</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>Most KQL write-ups hand you a query and move on. Real investigations don't work that way — the query is only useful if you know <em>which question it answers</em>, <em>how to read the result</em>, and <em>where it points you next</em>. This is the full decision tree for two scenarios that cover the vast majority of phishing reports:</p>
+
+<ul style="color:var(--ink-2); line-height:1.7; margin:0 0 6px 18px">
+  <li><strong>Scenario 1</strong> — email received, <em>not</em> clicked. A scoping-and-cleanup job. Six checks.</li>
+  <li><strong>Scenario 2</strong> — received, clicked, then forwarded internally <em>and</em> externally. A live incident with a spreading blast radius. Eight more checks, plus correlation.</li>
+</ul>
+
+<p>Scenario 2 is literally Scenario 1 plus the moment one check comes back with rows — so we build it as one continuous investigation. Everything below uses generic placeholders (<span class="k">contoso.com</span>, <span class="k">evil-domain.com</span>); swap in your real values.</p>
+
+<div class="analogy">
+  <p class="tag">The one join key that ties it all together</p>
+  <p>Defender assigns every message a unique <strong><span class="k">NetworkMessageId</span></strong>. Find it once, and it's the pivot for the entire email side of the investigation — recipients, URLs, attachments, clicks, and post-delivery actions all join back to it. Get this ID first; everything else hangs off it.</p>
+</div>
+
+<h2 class="head"><span class="num">00</span>The tables, and what each one answers</h2>
+<p class="sub">Know which table holds which fact, or you'll hunt in the wrong place.</p>
+
+<table class="cmp">
+  <tr><th>Table</th><th>The question it answers</th></tr>
+  <tr><td><span class="k">EmailEvents</span></td><td>Who sent what to whom, and what happened to it (delivery, auth)</td></tr>
+  <tr><td><span class="k">EmailUrlInfo</span></td><td>What URLs were in the message</td></tr>
+  <tr><td><span class="k">EmailAttachmentInfo</span></td><td>What files were attached, and their hashes</td></tr>
+  <tr><td><span class="k">UrlClickEvents</span></td><td>Did anyone actually click — and was it allowed or blocked</td></tr>
+  <tr><td><span class="k">EmailPostDeliveryEvents</span></td><td>Did ZAP or another action clean it up after delivery</td></tr>
+  <tr><td><span class="k">AADSignInEventsBeta</span></td><td>Entra sign-ins — new IPs, countries, risk after a click</td></tr>
+  <tr><td><span class="k">IdentityLogonEvents</span></td><td>Logons (fallback/corroboration when the Beta table is empty)</td></tr>
+  <tr><td><span class="k">CloudAppEvents</span></td><td>Post-compromise persistence: inbox rules, MFA changes, forwarding</td></tr>
+  <tr><td><span class="k">DeviceNetworkEvents</span></td><td>Did a click lead to an outbound connection / download on the endpoint</td></tr>
+</table>
+
+<h2 class="head"><span class="num">01</span>Scenario 1 — received, not clicked</h2>
+<p class="sub">Find → scope → extract IOCs → prove click/no-click → check ZAP → read auth.</p>
+
+<p>Pick a check to expand its query and how to read it. Work them top to bottom — Check 4 is the hinge that decides whether you're done or you've just walked into Scenario 2.</p>
+
+<div class="switch">
+  <div class="sw-group">
+    <p class="sw-glabel">Scenario 1 · foundation</p>
+    <div class="sw-pills">
+      <button class="sw-pill active" data-target="c1"><span class="n">01</span> Find the message</button>
+      <button class="sw-pill" data-target="c2"><span class="n">02</span> Scope recipients</button>
+      <button class="sw-pill" data-target="c3"><span class="n">03</span> Extract IOCs</button>
+      <button class="sw-pill" data-target="c4"><span class="n">04</span> Did anyone click? <span class="rk rk-high">hinge</span></button>
+      <button class="sw-pill" data-target="c5"><span class="n">05</span> ZAP / post-delivery</button>
+      <button class="sw-pill" data-target="c6"><span class="n">06</span> Auth posture</button>
+    </div>
+  </div>
+
+  <div class="sw-panels">
+
+    <div class="sw-panel active" id="c1">
+      <h3>01 · Find the message, establish posture</h3>
+      <p class="sit">Anchor the investigation on the exact message(s) and grab the <span class="k">NetworkMessageId</span>.</p>
+<pre class="code">EmailEvents
+| where Timestamp &gt; ago(7d)
+| where SenderFromAddress == "attacker@evil-domain.com"
+    or Subject has "Shared invoice document"
+| project Timestamp, <b>NetworkMessageId</b>, SenderFromAddress, SenderMailFromAddress,
+          RecipientEmailAddress, Subject, DeliveryAction, DeliveryLocation, ThreatTypes</pre>
+      <span class="steplab ver">How to read it</span>
+      <p class="fc-ex" style="color:var(--ink-2)">Grab the <span class="k">NetworkMessageId</span> — that's your anchor. <span class="k">DeliveryAction</span> (Delivered / Junked / Blocked / Replaced) and <span class="k">DeliveryLocation</span> (Inbox / Junk / Quarantine) give you posture instantly: a message in <strong>Inbox</strong> is live and dangerous; one already in <strong>Quarantine</strong> is contained. <span class="k">ThreatTypes</span> shows if Defender already tagged it Phish/Malware.</p>
+    </div>
+
+    <div class="sw-panel" id="c2">
+      <h3>02 · Scope — who else received it</h3>
+      <p class="sit">It's never one recipient. Pivot to the full campaign footprint.</p>
+<pre class="code">EmailEvents
+| where Timestamp &gt; ago(7d)
+| where SenderFromAddress == "attacker@evil-domain.com"
+    or Subject has "Shared invoice document"
+| summarize Recipients = make_set(RecipientEmailAddress),
+            Count = dcount(RecipientEmailAddress)
+        by Subject, SenderFromAddress, DeliveryAction, DeliveryLocation</pre>
+      <span class="steplab ver">How to read it</span>
+      <p class="fc-ex" style="color:var(--ink-2)">The <span class="k">Recipients</span> set is your true blast radius. Watch the <span class="k">DeliveryAction</span> split — often some copies were Delivered and some Junked, which tells you who's actually exposed. Attackers vary subjects across a wave, so for precision, match on the URL or attachment hash (next check) rather than subject alone.</p>
+    </div>
+
+    <div class="sw-panel" id="c3">
+      <h3>03 · Extract the IOCs</h3>
+      <p class="sit">You need these for the click check <em>and</em> for blocking.</p>
+<pre class="code"><span class="muted">// URLs in the message(s)</span>
+EmailEvents
+| where NetworkMessageId in ("&lt;id1&gt;", "&lt;id2&gt;")
+| join kind=inner EmailUrlInfo on NetworkMessageId
+| project NetworkMessageId, RecipientEmailAddress, Url, UrlDomain
+
+<span class="muted">// attachments + hashes</span>
+EmailAttachmentInfo
+| where NetworkMessageId in ("&lt;id1&gt;", "&lt;id2&gt;")
+| project NetworkMessageId, FileName, FileType, SHA256, ThreatTypes</pre>
+      <span class="steplab ver">How to read it</span>
+      <p class="fc-ex" style="color:var(--ink-2)">These <span class="k">Url</span> / <span class="k">UrlDomain</span> / <span class="k">SHA256</span> values are what you'll block in the Tenant Allow/Block List, and the URLs feed straight into the click check next. Note the <em>domain</em> as well as the full URL — attackers rotate paths on the same host.</p>
+    </div>
+
+    <div class="sw-panel" id="c4">
+      <h3>04 · Did anyone actually click? <span class="rk rk-high">the hinge</span></h3>
+      <p class="sit">"Not clicked" is proven by an <em>empty result</em>, never assumed.</p>
+<pre class="code">let msgIds = dynamic(["&lt;id1&gt;", "&lt;id2&gt;"]);
+let phishUrls = EmailUrlInfo
+    | where NetworkMessageId in (msgIds)
+    | distinct Url;
+UrlClickEvents
+| where Timestamp &gt; ago(7d)
+| where NetworkMessageId in (msgIds) or Url in (phishUrls)
+| project Timestamp, AccountUpn, Url, ActionType, IsClickedThrough, IPAddress</pre>
+      <span class="steplab ver">How to read it — this is the fork in the whole investigation</span>
+      <div class="sw-caution"><b>No rows</b> → nobody clicked. Scenario 1 stays a scoping-and-cleanup job; finish with Checks 5–6 and close.<br><br><b>Any rows</b> → someone clicked; you've escalated to Scenario 2. Then read the detail: <span class="k">ActionType</span> = <span class="k">ClickAllowed</span> vs <span class="k">ClickBlocked</span> (did Safe Links stop them?), and <span class="k">IsClickedThrough = 1</span> means they clicked <em>past</em> the warning page and landed on the site — the worst case. That <span class="k">Timestamp</span> becomes your pivot for the compromise check.</div>
+    </div>
+
+    <div class="sw-panel" id="c5">
+      <h3>05 · Did the system already clean it up?</h3>
+      <p class="sit">Check ZAP and other post-delivery actions before you remediate by hand.</p>
+<pre class="code">EmailPostDeliveryEvents
+| where NetworkMessageId in ("&lt;id1&gt;", "&lt;id2&gt;")
+| project Timestamp, NetworkMessageId, RecipientEmailAddress,
+          ActionType, Action, ActionResult</pre>
+      <span class="steplab ver">How to read it</span>
+      <p class="fc-ex" style="color:var(--ink-2)">A <strong>ZAP</strong> action with <span class="k">ActionResult == "Success"</span> means the message was auto-pulled from inboxes post-delivery — don't double-remediate what's already gone. An empty result means nothing was auto-actioned; it's still wherever it landed, and it's on you to purge.</p>
+    </div>
+
+    <div class="sw-panel" id="c6">
+      <h3>06 · Auth posture — spoof or compromised sender?</h3>
+      <p class="sit">This changes your entire response.</p>
+<pre class="code">EmailEvents
+| where NetworkMessageId == "&lt;id1&gt;"
+| extend Auth = parse_json(AuthenticationDetails)
+| project SenderFromAddress, SenderMailFromAddress, SenderIPv4,
+          SPF = Auth.SPF, DKIM = Auth.DKIM, DMARC = Auth.DMARC, CompAuth = Auth.CompAuth</pre>
+      <span class="steplab ver">How to read it</span>
+      <div class="sw-caution"><b>DMARC fail + external sender</b> = classic spoof. Block the sender/domain and move on.<br><br><b>Auth all passes</b> from a known partner domain = the sender's mailbox is likely <em>compromised</em>, not spoofed. Now the real response is warning that vendor — a spoof block does nothing, because the mail is authentically theirs.</div>
+    </div>
+
+  </div>
+</div>
+
+<div class="takeaway">
+  <p class="tag">Scenario 1 in one line</p>
+  <p>Find the message, scope the recipients, pull the IOCs, <em>prove</em> whether anyone clicked, confirm ZAP status, and read the auth. If Check 4 was empty — block the IOCs, purge any delivered copies, done. If it had rows, keep going.</p>
+</div>
+
+<h2 class="head"><span class="num">02</span>Scenario 2 — clicked, then forwarded internally + externally</h2>
+<p class="sub">Now there are three blast fronts: the clicker's identity, the internal forwards, and the external forwards. Chase all three to ground.</p>
+
+<div class="switch">
+  <div class="sw-group">
+    <p class="sw-glabel">Scenario 2 · the live incident</p>
+    <div class="sw-pills">
+      <button class="sw-pill active" data-target="d7"><span class="n">07</span> Characterize the click</button>
+      <button class="sw-pill" data-target="d8"><span class="n">08</span> Did it compromise them?</button>
+      <button class="sw-pill" data-target="d9"><span class="n">09</span> Persistence <span class="rk rk-high">critical</span></button>
+      <button class="sw-pill" data-target="d10"><span class="n">10</span> Trace the forwards</button>
+      <button class="sw-pill" data-target="d11"><span class="n">11</span> Scope wave two</button>
+      <button class="sw-pill" data-target="d12"><span class="n">12</span> Did they click too?</button>
+      <button class="sw-pill" data-target="d13"><span class="n">13</span> Endpoint fallout</button>
+      <button class="sw-pill" data-target="d14"><span class="n">14</span> Contain &amp; block</button>
+    </div>
+  </div>
+
+  <div class="sw-panels">
+
+    <div class="sw-panel active" id="d7">
+      <h3>07 · Confirm &amp; characterize the click</h3>
+      <p class="sit">Lock the exact click time — it's the pivot for everything identity-side.</p>
+<pre class="code">UrlClickEvents
+| where Timestamp &gt; ago(7d)
+| where AccountUpn == "victim@contoso.com"
+| where Url in (phishUrls) or NetworkMessageId in (msgIds)
+| project Timestamp, AccountUpn, Url, ActionType, IsClickedThrough,
+          IPAddress, DeviceName, Workload
+| sort by Timestamp asc</pre>
+      <span class="steplab ver">How to read it</span>
+      <p class="fc-ex" style="color:var(--ink-2)"><span class="k">IsClickedThrough == 1</span> + <span class="k">ActionType == "ClickAllowed"</span> = they reached the credential-harvest page; treat credentials as exposed. <span class="k">IPAddress</span> and <span class="k">DeviceName</span> tell you <em>where</em> they clicked (corporate device? BYOD?). The earliest <span class="k">Timestamp</span> is your <span class="k">clickTime</span> pivot for Checks 8–9 and 13.</p>
+    </div>
+
+    <div class="sw-panel" id="d8">
+      <h3>08 · Did the click compromise the account?</h3>
+      <p class="sit">Pivot to identity. Both tables — not every tenant streams the Beta one.</p>
+<pre class="code"><span class="muted">// Entra sign-ins in the 24h after the click</span>
+let clickTime = datetime(2026-01-01T00:00:00Z);   <span class="muted">// from Check 7</span>
+AADSignInEventsBeta
+| where Timestamp between (clickTime .. (clickTime + 24h))
+| where AccountUpn == "victim@contoso.com"
+| project Timestamp, IPAddress, Country, City, ClientAppUsed,
+          ErrorCode, RiskLevelDuringSignIn, ConditionalAccessStatus, UserAgent
+| sort by Timestamp asc</pre>
+<pre class="code"><span class="muted">// fallback / corroboration if the Beta table isn't populated</span>
+IdentityLogonEvents
+| where Timestamp between (clickTime .. (clickTime + 24h))
+| where AccountUpn == "victim@contoso.com"
+| project Timestamp, LogonType, Application, IPAddress, DeviceName, ActionType</pre>
+      <span class="steplab ver">How to read it</span>
+      <p class="fc-ex" style="color:var(--ink-2)">Successful sign-ins (<span class="k">ErrorCode == 0</span>) from a <strong>new country/IP</strong> shortly after the click = likely token theft / AiTM. <span class="k">RiskLevelDuringSignIn</span> = high, or <span class="k">ClientAppUsed</span> showing legacy/unusual clients, are red flags. A successful sign-in that <em>satisfied</em> Conditional Access from an attacker IP is the token-replay signature — cross-reference the <a href="/posts/aitm-account-takeover.html">account-takeover playbook</a> for the full identity response.</p>
+    </div>
+
+    <div class="sw-panel" id="d9">
+      <h3>09 · Persistence — the part that keeps them in <span class="rk rk-high">critical</span></h3>
+      <p class="sit">Inbox rules, MFA tampering, forwarding. A password reset alone removes none of these.</p>
+<pre class="code">let clickTime = datetime(2026-01-01T00:00:00Z);
+CloudAppEvents
+| where Timestamp between (clickTime .. (clickTime + 24h))
+| where AccountId == "&lt;victim-object-id&gt;" or AccountDisplayName has "victim"
+| where ActionType in ("New-InboxRule","Set-InboxRule","Set-Mailbox",
+        "Update user.","Add app role assignment to service principal.",
+        "Register security info.","Disable Strong Authentication.",
+        "Update StsRefreshTokenValidFrom Timestamp.","Add-MailboxPermission")
+| project Timestamp, ActionType, AccountDisplayName, IPAddress, RawEventData
+| sort by Timestamp asc</pre>
+      <span class="steplab ver">How to read it</span>
+      <div class="sw-caution stop"><b>Each of these is an independent persistence mechanism.</b> <span class="k">New-InboxRule</span> that moves/deletes/forwards mail = the BEC concealment rule that hides the victim's own "is this you?" replies. <span class="k">Register security info.</span> / <span class="k">Disable Strong Authentication.</span> = attacker registering their <em>own</em> MFA device. <span class="k">Update StsRefreshTokenValidFrom</span> can signal token manipulation. You must rip out every one — reset-only leaves the attacker inside.</div>
+    </div>
+
+    <div class="sw-panel" id="d10">
+      <h3>10 · Trace the forwards (the victim re-sent the phish)</h3>
+      <p class="sit">Two directions to catch — internal and external.</p>
+<pre class="code">let phishUrls = EmailUrlInfo | where NetworkMessageId in (msgIds) | distinct Url;
+EmailEvents
+| where Timestamp &gt; ago(7d)
+| where SenderFromAddress == "victim@contoso.com"
+| join kind=leftouter EmailUrlInfo on NetworkMessageId
+| where Url in (phishUrls) or Subject has "Shared invoice document"
+        or Subject has "FW:" or Subject has "Fwd:"
+| project Timestamp, NetworkMessageId, RecipientEmailAddress,
+          EmailDirection, Subject, Url, DeliveryAction, DeliveryLocation
+| sort by Timestamp asc</pre>
+      <span class="steplab ver">How to read it</span>
+      <p class="fc-ex" style="color:var(--ink-2)"><span class="k">EmailDirection</span> splits your two blast fronts — <strong>Intraorg</strong> (internal recipients — brand-new potential victims <em>inside</em> the org) vs <strong>Outbound</strong> (external recipients — reputational damage, and you must notify them). Collect every <span class="k">RecipientEmailAddress</span>; that's wave two.</p>
+    </div>
+
+    <div class="sw-panel" id="d11">
+      <h3>11 · Scope wave two by direction</h3>
+      <p class="sit">A clean two-line answer: how many internal, how many external.</p>
+<pre class="code">EmailEvents
+| where Timestamp &gt; ago(7d)
+| where SenderFromAddress == "victim@contoso.com"
+| where Subject has_any ("Shared invoice document", "FW:", "Fwd:")
+| summarize Recipients = make_set(RecipientEmailAddress),
+            Count = dcount(RecipientEmailAddress)
+        by EmailDirection</pre>
+      <span class="steplab ver">How to read it</span>
+      <p class="fc-ex" style="color:var(--ink-2)">Internal names go straight into the same investigation — check <em>their</em> clicks next (Check 12). External names go onto a notification list; those organisations need to know a phish came from your user. The counts also size the incident for your report.</p>
+    </div>
+
+    <div class="sw-panel" id="d12">
+      <h3>12 · Did wave-two recipients click? (recurse the hinge)</h3>
+      <p class="sit">The same payload, carried in the forward, against new people.</p>
+<pre class="code">let wave2Urls = phishUrls;   <span class="muted">// same payload carried in the forward</span>
+UrlClickEvents
+| where Timestamp &gt; ago(7d)
+| where Url in (wave2Urls)
+| where AccountUpn != "victim@contoso.com"     <span class="muted">// exclude patient zero</span>
+| project Timestamp, AccountUpn, Url, ActionType, IsClickedThrough, IPAddress
+| sort by Timestamp asc</pre>
+      <span class="steplab ver">How to read it</span>
+      <div class="sw-caution"><b>Any rows</b> = the phish is spreading internally and you have <em>new</em> victims — loop each one back through Checks 7–9. <b>Empty</b> = the forward hasn't (yet) claimed anyone else, but purge it anyway before it does.</div>
+    </div>
+
+    <div class="sw-panel" id="d13">
+      <h3>13 · Endpoint fallout, if a link led to a download</h3>
+      <p class="sit">Catch the case where the "document" pulled a payload.</p>
+<pre class="code">let clickTime = datetime(2026-01-01T00:00:00Z);
+DeviceNetworkEvents
+| where Timestamp between (clickTime .. (clickTime + 2h))
+| where InitiatingProcessAccountUpn == "victim@contoso.com"
+| where RemoteUrl in (phishUrls) or RemoteUrl has "evil-domain.com"
+| project Timestamp, DeviceName, RemoteUrl, RemoteIP,
+          InitiatingProcessFileName, InitiatingProcessCommandLine</pre>
+      <span class="steplab ver">How to read it</span>
+      <p class="fc-ex" style="color:var(--ink-2)">Outbound connections to the phish domain, and the process that made them. If the initiating process is a browser it's likely just the click; if it's a script host (<span class="k">powershell.exe</span>, <span class="k">mshta.exe</span>) you've got execution — pivot to <span class="k">DeviceProcessEvents</span> / <span class="k">DeviceFileEvents</span> for the dropped file and treat it as an endpoint compromise.</p>
+    </div>
+
+    <div class="sw-panel" id="d14">
+      <h3>14 · Containment &amp; the consolidated IOC block</h3>
+      <p class="sit">One query to assemble every indicator to block.</p>
+<pre class="code">EmailEvents | where NetworkMessageId in (msgIds)
+| join kind=leftouter EmailUrlInfo on NetworkMessageId
+| join kind=leftouter EmailAttachmentInfo on NetworkMessageId
+| summarize Senders = make_set(SenderFromAddress),
+            Domains = make_set(UrlDomain),
+            Urls    = make_set(Url),
+            Hashes  = make_set(SHA256)</pre>
+      <span class="steplab ver">How to read it → then act</span>
+      <div class="sw-caution stop"><b>Close-out sequence:</b> block that consolidated IOC set in the Tenant Allow/Block List → purge the original <em>and</em> the forwards via compliance search → remediate the clicker in the right order: <strong>revoke sessions → reset password → remove rogue MFA method → clear inbox rules</strong> (a password reset alone won't evict a token thief). Then re-run Check 8 to confirm no fresh sign-ins after containment.</div>
+    </div>
+
+  </div>
+</div>
+
+<h2 class="head"><span class="num">03</span>Correlation — one timeline, all signals</h2>
+<p class="sub">Individual checks confirm facts. Correlation turns them into a story you can act on and defend.</p>
+
+<p>The power of Advanced Hunting isn't any single table — it's that Email, Identity, Endpoint, and Cloud share timestamps and identifiers, so you can lay every event on <em>one</em> timeline and see cause and effect. A phishing report that looked like six unrelated alerts becomes a single, legible chain:</p>
+
+<div class="xtimeline">
+  <div class="xrow"><span class="xt">09:48</span><span class="xsrc">EmailEvents</span><p class="xd">Message delivered to <span class="k">Inbox</span> from a compromised partner domain; auth <em>passed</em> (so not a spoof).</p></div>
+  <div class="xrow warn"><span class="xt">09:53</span><span class="xsrc">UrlClickEvents</span><p class="xd"><span class="k">ClickAllowed</span>, <span class="k">IsClickedThrough = 1</span> — the user reached the credential page.</p></div>
+  <div class="xrow bad"><span class="xt">10:31</span><span class="xsrc">AADSignInEventsBeta</span><p class="xd">Successful sign-in from a <strong>new country</strong>, CA satisfied — token replay. Account is compromised.</p></div>
+  <div class="xrow bad"><span class="xt">10:34</span><span class="xsrc">CloudAppEvents</span><p class="xd"><span class="k">New-InboxRule</span> hiding replies + <span class="k">Register security info.</span> (attacker MFA device). Persistence established.</p></div>
+  <div class="xrow warn"><span class="xt">10:42</span><span class="xsrc">EmailEvents</span><p class="xd">Victim mailbox sends the phish onward — <strong>Intraorg</strong> to 8 colleagues, <strong>Outbound</strong> to 3 clients.</p></div>
+  <div class="xrow"><span class="xt">10:55</span><span class="xsrc">UrlClickEvents</span><p class="xd">Wave-two click check on the forwards — one internal colleague clicked; recurse the investigation for them.</p></div>
+</div>
+
+<p>Correlating like this is what separates "we blocked a phishing email" from "we understand exactly what happened, how far it went, and what we removed." A useful correlation query joins the signals directly — here, tying each click to the sign-ins that followed it in the same hour:</p>
+
+<pre class="code"><span class="muted">// clicks correlated with the sign-ins that followed within the hour</span>
+let clicks = UrlClickEvents
+    | where Timestamp &gt; ago(7d) and ActionType == "ClickAllowed"
+    | project ClickTime = Timestamp, AccountUpn, Url;
+clicks
+| join kind=inner (
+    AADSignInEventsBeta
+    | where Timestamp &gt; ago(7d) and ErrorCode == 0
+    | project SignInTime = Timestamp, AccountUpn, IPAddress, Country, RiskLevelDuringSignIn
+  ) on AccountUpn
+| where SignInTime between (ClickTime .. (ClickTime + 1h))
+| project AccountUpn, ClickTime, Url, SignInTime, IPAddress, Country, RiskLevelDuringSignIn
+| sort by ClickTime asc</pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Correlation is signal, not proof of causation</h3>
+    <p>A sign-in after a click is <em>strongly suggestive</em>, not conclusive — the user might have legitimately logged in from a new location. That's exactly why the final step is human validation: the timeline focuses attention, a person confirms intent. Never auto-close (or auto-escalate) purely on a time correlation.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">04</span>The IR report template</h2>
+<p class="sub">Fill this in as you run the checks. It doubles as your assessment worksheet and your human-validation record.</p>
+
+<p>Every query above maps to a line in this template. Filling it in <em>as you go</em> means that by the time you reach containment, your report is already written — and any teammate can validate your conclusions against the raw check outputs. Copy it into your ticket and replace the bracketed fields.</p>
+
+<div class="report">
+  <h4>PHISHING INVESTIGATION — INCIDENT REPORT</h4>
+  <p class="rlead">Fill each field from the corresponding check. "N/A" and "None found" are valid, valuable answers.</p>
+<pre><span class="k">## SUMMARY</span>
+Incident ID      : [ ticket # ]
+Reported by      : [ user / detection ]        Date/Time (UTC): [ ... ]
+Analyst          : [ you ]                      Severity: [ Low / Med / High / Critical ]
+One-line verdict : [ e.g. "Phish clicked, account compromised, contained" ]
+
+<span class="k">## THE MESSAGE            (Checks 1–3, 6)</span>
+NetworkMessageId : [ id(s) ]
+Sender (From)    : [ addr ]   Mail-From: [ addr ]   Sender IP: [ ip ]
+Subject          : [ ... ]
+Delivery         : [ Delivered / Junked / Quarantined ]  Location: [ Inbox / ... ]
+Auth (SPF/DKIM/DMARC): [ pass/fail ]  →  Verdict: [ Spoof / Compromised sender ]
+URLs (IOCs)      : [ url(s) / domain(s) ]
+Attachments      : [ name / SHA256 ]   or   None
+
+<span class="k">## SCOPE — WAVE ONE       (Check 2)</span>
+Total recipients : [ n ]     Delivered to inbox: [ n ]     Quarantined: [ n ]
+Recipient list   : [ ... ]
+
+<span class="k">## INTERACTION            (Checks 4, 7)</span>
+Clicked?         : [ Yes / No ]   ← the hinge
+  If yes → who   : [ upn ]        When (clickTime): [ ... ]
+  ClickAllowed?  : [ Yes/No ]     Clicked through to page: [ Yes/No ]
+  Device / IP    : [ ... ]
+
+<span class="k">## COMPROMISE ASSESSMENT  (Checks 8, 9, 13)</span>
+Suspicious sign-in post-click : [ Yes/No ]  New country/IP: [ ... ]  Risk: [ ... ]
+Persistence found:
+  - Inbox rule            : [ Yes/No — name/action ]
+  - MFA method registered : [ Yes/No — when ]
+  - Forwarding / delegation: [ Yes/No ]
+Endpoint execution        : [ Yes/No — process / file ]
+
+<span class="k">## SPREAD — WAVE TWO      (Checks 10–12)</span>
+Forwarded by victim?      : [ Yes/No ]
+  Internal recipients     : [ n ]  → clicked: [ n ]  (new victims: [ list ])
+  External recipients     : [ n ]  → notify: [ list ]
+
+<span class="k">## CONTAINMENT            (Check 14)</span>
+IOCs blocked (TABL)       : [ senders / domains / urls / hashes ]
+Messages purged           : [ original + forwards — count ]
+Identity remediation      : [ sessions revoked / pwd reset / MFA cleaned / rules removed ]
+Post-containment sign-in check re-run: [ clean / not ]
+
+<span class="k">## VALIDATION &amp; CLOSURE</span>
+Correlation reviewed by human : [ analyst initials ]
+Residual risk / follow-ups    : [ ... ]
+Status                        : [ Open / Contained / Closed ]</pre>
+</div>
+
+<div class="takeaway">
+  <p class="tag">The whole playbook in one breath</p>
+  <p>Anchor on <span class="k">NetworkMessageId</span>. Find → scope → IOCs → <em>prove</em> the click. If clicked: characterize it, pivot to identity for compromise, rip out persistence, trace the internal <em>and</em> external forwards, recurse the click check on wave two, check the endpoint, then contain and block. Lay it all on one timeline, and let a human validate the story the correlation tells. No gap between the report and the incident being genuinely closed.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/defender-xdr/advanced-hunting-schema-tables">Advanced Hunting schema reference — Microsoft Learn</a><span>every table and column used above</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/defender-xdr/advanced-hunting-emailevents-table">EmailEvents table</a><span>delivery, auth, and NetworkMessageId</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/defender-xdr/advanced-hunting-urlclickevents-table">UrlClickEvents table</a><span>the click-through signal</span></li>
+  <li><a href="/posts/aitm-account-takeover.html">The iPhone she never owned — account-takeover response</a><span>the identity playbook this pivots into</span></li>
+</ul>
+</div>
+
+<p class="disclaimer" style="color:var(--ink-3);font-size:13px;margin-top:28px">Queries use placeholder values; adapt table and column names to your tenant's licensing and schema version.</p>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/detection/">Detection</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+<script>
+(function(){
+  var pills=document.querySelectorAll('.sw-pill');
+  var panels=document.querySelectorAll('.sw-panel');
+  function show(id){
+    for(var i=0;i<panels.length;i++){ panels[i].classList.toggle('active', panels[i].id===id); }
+    for(var j=0;j<pills.length;j++){ pills[j].classList.toggle('active', pills[j].getAttribute('data-target')===id); }
+  }
+  for(var k=0;k<pills.length;k++){
+    pills[k].addEventListener('click', function(){ show(this.getAttribute('data-target')); });
+  }
+})();
+</script>
+
+</body>
+</html>
