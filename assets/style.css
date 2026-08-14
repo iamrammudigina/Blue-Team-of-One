@@ -274,3 +274,18 @@ noscript .sw-panel{display:block; border-bottom:1px solid var(--line); padding-b
   .home-hero-art{max-width:260px; order:-1}
 }
 @media (max-width:480px){ .home-hero-art{max-width:220px} }
+
+/* ---- Search page (v17) ---- */
+.search-wrap{max-width:660px; margin:0 auto}
+.search-box{width:100%; box-sizing:border-box; font-family:"IBM Plex Sans",sans-serif; font-size:18px; padding:16px 20px; border:1px solid var(--line); border-radius:14px; background:var(--card); color:var(--ink); box-shadow:0 2px 12px rgba(16,21,33,.05); transition:border-color .15s, box-shadow .15s}
+.search-box::placeholder{color:var(--ink-3)}
+.search-box:focus{outline:none; border-color:var(--teal); box-shadow:0 0 0 3px rgba(15,110,86,.12)}
+.search-meta{color:var(--ink-3); font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.03em; margin:16px 3px 10px}
+.search-results{display:flex; flex-direction:column; gap:12px}
+.sresult{display:block; padding:18px 20px; border:1px solid var(--line); border-radius:14px; background:var(--card); text-decoration:none; transition:border-color .15s, transform .12s, box-shadow .15s}
+.sresult:hover{border-color:var(--line-2); transform:translateY(-1px); box-shadow:0 8px 24px rgba(16,21,33,.07)}
+.sresult .r-cat{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--teal)}
+.sresult h3{font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:18px; color:var(--ink); margin:5px 0 0; letter-spacing:-.01em}
+.sresult p{color:var(--ink-2); font-size:14.5px; line-height:1.5; margin:6px 0 0}
+.sresult mark{background:#FBEEC2; color:inherit; padding:0 2px; border-radius:3px}
+.search-empty{color:var(--ink-3); text-align:center; padding:36px 10px; font-size:15px}
