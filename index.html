@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Blue Team of One — Security field notes</title>
-<meta name="description" content="Practitioner security field notes by Ram Mudigina — detection engineering, identity hardening, incident response, and eDiscovery.">
+<meta name="description" content="Practitioner blue-team field notes by Ram Mudigina — incident response, identity, endpoint, email security, detection, and digital forensics.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -19,12 +19,11 @@
       <span class="tag">field notes · security</span>
     </a>
     <nav class="site-nav">
-      <a href="/email/">Email</a>
+      <a href="/ir/">Incident Response</a>
       <a href="/identity/">Identity</a>
-      <a href="/detection/">Detection</a>
-      <a href="/cloud-ir/">Cloud &amp; IR</a>
-      <a href="/exchange/">Exchange</a>
-      <a href="/legal/">Legal</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/forensics/">Forensics</a>
       <a href="/about.html">About</a>
       <a href="/search.html">Search</a>
     </nav>
@@ -38,31 +37,15 @@
       <aside class="li-left">
         <div class="li-card">
           <div class="pc-cover"><svg viewBox="0 0 320 92" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <defs>
-    <linearGradient id="cbg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0F2036"/><stop offset="1" stop-color="#0A1120"/></linearGradient>
-    <radialGradient id="cglow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#2dd4bf" stop-opacity=".55"/><stop offset="1" stop-color="#2dd4bf" stop-opacity="0"/></radialGradient>
-  </defs>
+  <defs><linearGradient id="cbg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0F2036"/><stop offset="1" stop-color="#0A1120"/></linearGradient>
+  <radialGradient id="cglow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#2dd4bf" stop-opacity=".55"/><stop offset="1" stop-color="#2dd4bf" stop-opacity="0"/></radialGradient></defs>
   <rect width="320" height="92" fill="url(#cbg)"/>
-  <g stroke="#6ee7d0" stroke-opacity=".08" stroke-width="1">
-    <path d="M0 23H320M0 46H320M0 69H320"/><path d="M40 0V92M100 0V92M160 0V92M220 0V92M280 0V92"/>
-  </g>
+  <g stroke="#6ee7d0" stroke-opacity=".08" stroke-width="1"><path d="M0 23H320M0 46H320M0 69H320"/><path d="M40 0V92M100 0V92M160 0V92M220 0V92M280 0V92"/></g>
   <circle cx="250" cy="44" r="42" fill="url(#cglow)"/>
-  <g stroke="#34d3b5" stroke-width="1" stroke-opacity=".7">
-    <line x1="46" y1="60" x2="92" y2="34"/><line x1="92" y1="34" x2="150" y2="58"/>
-    <line x1="150" y1="58" x2="210" y2="30"/><line x1="92" y1="34" x2="120" y2="72"/>
-    <line x1="210" y1="30" x2="256" y2="52"/><line x1="150" y1="58" x2="120" y2="72"/>
-  </g>
-  <g fill="#22d3ee">
-    <circle cx="46" cy="60" r="3"/><circle cx="92" cy="34" r="3.6"/><circle cx="150" cy="58" r="3"/>
-    <circle cx="210" cy="30" r="3.4"/><circle cx="120" cy="72" r="2.6"/><circle cx="256" cy="52" r="2.6"/>
-  </g>
-  <g transform="translate(232,20)" stroke="#7ff0dd" stroke-width="1.6" fill="none" stroke-linejoin="round">
-    <path d="M12 2l11 4v9c0 7-5 11-11 13-6-2-11-6-11-13V6z" fill="#0e2a3a" fill-opacity=".7"/>
-    <rect x="7.5" y="12" width="9" height="7" rx="1.2"/><path d="M9 12v-2a3 3 0 0 1 6 0v2"/>
-  </g>
-  <g fill="#6ee7d0" fill-opacity=".5" font-family="monospace" font-size="6">
-    <text x="14" y="16">01001</text><text x="14" y="82">10110</text><text x="270" y="84">0x1F</text>
-  </g>
+  <g stroke="#34d3b5" stroke-width="1" stroke-opacity=".7"><line x1="46" y1="60" x2="92" y2="34"/><line x1="92" y1="34" x2="150" y2="58"/><line x1="150" y1="58" x2="210" y2="30"/><line x1="92" y1="34" x2="120" y2="72"/><line x1="210" y1="30" x2="256" y2="52"/><line x1="150" y1="58" x2="120" y2="72"/></g>
+  <g fill="#22d3ee"><circle cx="46" cy="60" r="3"/><circle cx="92" cy="34" r="3.6"/><circle cx="150" cy="58" r="3"/><circle cx="210" cy="30" r="3.4"/><circle cx="120" cy="72" r="2.6"/><circle cx="256" cy="52" r="2.6"/></g>
+  <g transform="translate(232,20)" stroke="#7ff0dd" stroke-width="1.6" fill="none" stroke-linejoin="round"><path d="M12 2l11 4v9c0 7-5 11-11 13-6-2-11-6-11-13V6z" fill="#0e2a3a" fill-opacity=".7"/><rect x="7.5" y="12" width="9" height="7" rx="1.2"/><path d="M9 12v-2a3 3 0 0 1 6 0v2"/></g>
+  <g fill="#6ee7d0" fill-opacity=".5" font-family="monospace" font-size="6"><text x="14" y="16">01001</text><text x="14" y="82">10110</text><text x="270" y="84">0x1F</text></g>
 </svg></div>
           <div class="pc-body">
             <img class="pc-avatar" src="/assets/img/avatar-hoodie.webp?v=1" alt="Ram Mudigina">
@@ -86,49 +69,42 @@
       <section class="li-center">
         <div class="feed-head">
           <h2>Explore by vertical</h2>
-          <span>six practice areas</span>
+          <span>blue-team practice areas</span>
         </div>
         <div class="tiles">
-        <a class="tile t-sky" href="/email/">
+        <a class="tile t-amber" href="/ir/">
           <svg class="t-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
-          <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 7.5l9 6 9-6"/></svg></span>
-          <h2>Email</h2>
-          <p>Mail flow, deliverability, and the spam war in both directions.</p>
+          <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M12 8v4M12 15h.01"/></svg></span>
+          <h2>Incident Response</h2>
+          <p>Running the response when it matters — investigation, containment, and the post-incident writeups that make the next one faster.</p>
           <div class="t-meta"><span class="live">2 posts</span> · 3 sections</div>
         </a>
         <a class="tile t-indigo" href="/identity/">
           <svg class="t-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
           <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4.2"/><path d="M11 11l7 7v3h-3l-1-1h-2v-2h-2l-1-1"/></svg></span>
-          <h2>Identity &amp; Access</h2>
+          <h2>Identity Security</h2>
           <p>Tokens, Conditional Access, and proving who is really signing in.</p>
           <div class="t-meta"><span class="live">3 posts</span> · 3 sections</div>
         </a>
-        <a class="tile t-teal" href="/detection/">
+        <a class="tile t-cyan" href="/endpoint/">
           <svg class="t-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
-          <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-6 4 12 2-6h4"/></svg></span>
-          <h2>Detection Engineering</h2>
-          <p>Turning telemetry into signal — rule design, tuning, correlation.</p>
-          <div class="t-meta">3 sections · coming soon</div>
+          <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20M9.5 16l-.5 4M14.5 16l.5 4"/></svg></span>
+          <h2>Endpoint Security</h2>
+          <p>Defending the device — detections, remediation, and the hardening that shrinks the attack surface.</p>
+          <div class="t-meta"><span class="live">1 post</span> · 2 sections</div>
         </a>
-        <a class="tile t-amber" href="/cloud-ir/">
+        <a class="tile t-sky" href="/email/">
           <svg class="t-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
-          <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></span>
-          <h2>Cloud, Endpoint &amp; IR</h2>
-          <p>Hardening the estate and running the response when it matters.</p>
-          <div class="t-meta"><span class="live">3 posts</span> · 3 sections</div>
+          <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 7.5l9 6 9-6"/></svg></span>
+          <h2>Email Security</h2>
+          <p>Mail flow, deliverability, and the phishing war in both directions — the vertical that generates the most day-to-day tickets.</p>
+          <div class="t-meta"><span class="live">3 posts</span> · 4 sections</div>
         </a>
-        <a class="tile t-cyan" href="/exchange/">
+        <a class="tile t-rose" href="/forensics/">
           <svg class="t-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
-          <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l3-8h12l3 8M3 13v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5M3 13h5l1.5 2h5L20 13"/></svg></span>
-          <h2>Exchange Administration</h2>
-          <p>Day-to-day Exchange Online operations and the PowerShell behind them.</p>
-          <div class="t-meta"><span class="live">1 post</span> · 4 sections</div>
-        </a>
-        <a class="tile t-rose" href="/legal/">
-          <svg class="t-arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M9 7h8v8"/></svg>
-          <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M7 21h10M4 8h16M12 3l-8 5m8-5l8 5M4 8l-2 5a3 3 0 0 0 6 0L4 8zm16 0l-2 5a3 3 0 0 0 6 0L20 8z"/></svg></span>
-          <h2>Legal, eDiscovery &amp; Holds</h2>
-          <p>Litigation holds, eDiscovery, content search, and the incidents holds cause.</p>
+          <span class="t-ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M11 8v6M8 11h6"/></svg></span>
+          <h2>Digital Forensics</h2>
+          <p>Preservation and discovery — litigation holds, eDiscovery, content search, and the operational incidents holds cause downstream.</p>
           <div class="t-meta"><span class="live">3 posts</span> · 5 sections</div>
         </a>
         </div>
@@ -143,11 +119,11 @@
         <div class="li-card side-card">
           <h4>Recent notes</h4>
           <div class="rn-list">
-          <a class="rn-item" href="/posts/aitm-account-takeover.html"><span class="c">Cloud, Endpoint & IR</span><span class="t">The iPhone she never owned</span></a>
-          <a class="rn-item" href="/posts/scareware-wildcard-bypass.html"><span class="c">Cloud, Endpoint & IR</span><span class="t">The scareware that walked through your allow-list</span></a>
-          <a class="rn-item" href="/posts/clickfix-endpoint-remediation.html"><span class="c">Cloud, Endpoint & IR</span><span class="t">ClickFix: the attack that makes the victim run the malware</span></a>
-          <a class="rn-item" href="/posts/phishing-trusted-sender.html"><span class="c">Email</span><span class="t">When the sender is real and the email still isn't</span></a>
-          <a class="rn-item" href="/posts/onedrive-archive-recovery.html"><span class="c">Legal, eDiscovery & Holds</span><span class="t">The archived OneDrive and the billing trap</span></a>
+          <a class="rn-item" href="/posts/aitm-account-takeover.html"><span class="c">Incident Response</span><span class="t">The iPhone she never owned</span></a>
+          <a class="rn-item" href="/posts/scareware-wildcard-bypass.html"><span class="c">Incident Response</span><span class="t">The scareware that walked through your allow-list</span></a>
+          <a class="rn-item" href="/posts/clickfix-endpoint-remediation.html"><span class="c">Endpoint Security</span><span class="t">ClickFix: the attack that makes the victim run the malware</span></a>
+          <a class="rn-item" href="/posts/phishing-trusted-sender.html"><span class="c">Email Security</span><span class="t">When the sender is real and the email still isn't</span></a>
+          <a class="rn-item" href="/posts/onedrive-archive-recovery.html"><span class="c">Digital Forensics</span><span class="t">The archived OneDrive and the billing trap</span></a>
           </div>
         </div>
       </aside>
