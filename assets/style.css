@@ -386,3 +386,6 @@ noscript .sw-panel{display:block; border-bottom:1px solid var(--line); padding-b
 .report .rlead{color:#8A93A1; font-size:12px; margin:0 0 16px; font-family:"IBM Plex Sans",sans-serif}
 .report pre{margin:0; white-space:pre-wrap; color:#C7D0DC}
 .report .k{color:#7fe3bf}
+
+/* Cloud Security tile tint (v21) */
+.tile.t-violet{background:linear-gradient(140deg,#EEE9FF,#FFFFFF 58%)}  .tile.t-violet .t-ico{background:#E6DEFB; color:#6D28D9}

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deploying Entra Internet Access, end to end — Blue Team of One</title>
+<meta name="description" content="Cloud-delivered web filtering with no proxy box: deploying Microsoft Entra Internet Access (Global Secure Access) end to end — client prerequisites, traffic forwarding, filtering policies, security profiles, the Conditional Access linkage that enforces it, and how to verify and roll out.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=21">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/" aria-current="page">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/cloud/">Cloud Security</a><span class="sep">›</span><a href="/cloud/sse.html">Secure access (SSE)</a></p>
+    <p class="eyebrow"><span class="dot"></span>Cloud security · secure service edge</p>
+    <h1>Deploying Entra Internet Access, <em>end to end</em></h1>
+    <p class="lede">Web content filtering with no proxy appliance and no VPN hairpin — the filtering lives in Microsoft's cloud edge, and Conditional Access decides who it applies to. Here's the complete build: the client prerequisites people miss, the traffic-forwarding and policy chain, the Conditional Access linkage that actually enforces it, how to verify, and how to roll out without breaking anyone's browsing.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 14, 2026</span>
+      <span>~12 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>Entra Internet Access is Microsoft's identity-aware <strong>Secure Web Gateway</strong>, delivered as part of Global Secure Access (GSA) — Microsoft's Security Service Edge (SSE) platform. A lightweight client on each endpoint forwards internet traffic to Microsoft's edge, where web content filtering decides what's allowed, and <strong>Conditional Access</strong> decides who the filtering applies to. No appliance to haul traffic through, no VPN hairpin — the protection follows the user's identity, not their network location.</p>
+
+<div class="analogy">
+  <p class="tag">Why enforcement lives in Conditional Access</p>
+  <p>This is the mental model that makes the whole thing click: filtering policies are grouped into <em>security profiles</em>, and a security profile does nothing to a user until a <strong>Conditional Access session control</strong> hands it to them. Identity and network security run from the same policy engine. That's also why a user is protected identically at home, on a plane, or in the office — enforcement rides the Conditional Access session, not the corporate perimeter.</p>
+</div>
+
+<h2 class="head"><span class="num">01</span>Prerequisites &amp; client-side gotchas</h2>
+<p class="sub">The filtering silently fails if the client environment isn't prepared. Do these first.</p>
+
+<p>Licensing is Entra Internet Access (standalone or in the Entra Suite) plus an Entra ID P1/P2 base; you'll need the <strong>Global Secure Access Administrator</strong> and <strong>Conditional Access Administrator</strong> roles. Devices must be Entra joined or hybrid joined (not "registered" only). But the part that actually bites people is the <strong>client environment</strong> — get these wrong and traffic quietly evades filtering:</p>
+
+<table class="cmp">
+  <tr><th>Setting</th><th>Why it matters</th></tr>
+  <tr><td>Disable <strong>QUIC</strong> in browsers</td><td>QUIC (UDP/443) sidesteps the standard HTTP/S ports the platform inspects — leave it on and traffic bypasses filtering</td></tr>
+  <tr><td>Prefer <strong>IPv4</strong> (registry <span class="k">DisabledComponents</span>)</td><td>The platform assumes IPv4 on ports 80/443; IPv6 paths can escape acquisition</td></tr>
+  <tr><td>Disable <strong>Secure DNS</strong> (DoH/DoT)</td><td>Encrypted DNS in the browser hides the name resolution the filter relies on</td></tr>
+</table>
+
+<pre class="code"><span class="muted"># prefer IPv4 (per Microsoft guidance for the GSA client)</span>
+<span class="muted"># HKLM\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters</span>
+<span class="muted"># DWORD (32-bit): DisabledComponents = 0xffffffff</span>
+
+<span class="muted"># disable QUIC in Chrome/Edge:</span>
+<span class="muted">#   chrome://flags  → "Experimental QUIC protocol" → Disabled</span>
+<span class="muted">#   edge://flags    → "Experimental QUIC protocol" → Disabled</span></pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>These are the "it's not blocking anything" causes</h3>
+    <p>When a category that should be blocked still loads, the culprit is almost always one of the three above — usually QUIC. Bake them into the device build (or push via Intune) <em>before</em> you expect enforcement, or you'll chase policy problems that are really client problems.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">02</span>Deploy the GSA client &amp; enable traffic forwarding</h2>
+<p class="sub">Lay the pipe: get traffic flowing to Microsoft's edge.</p>
+
+<p>The client is downloaded from <strong>Global Secure Access → Connect → Client download</strong> and pushed to endpoints (silently via Intune for a fleet). Once installed and signed in, it shows as connected to Entra — and to Microsoft 365 if that profile is on. Then enable the forwarding profile:</p>
+
+<pre class="code"><span class="muted"># enable the Internet Access traffic forwarding profile</span>
+Global Secure Access &gt; Connect &gt; Traffic forwarding
+  → enable "Internet access profile"
+  → (recommended) also enable "Microsoft traffic" for optimal M365 path</pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Bypass precedence, and the "all users" default</h3>
+    <p>A destination bypassed in the <strong>Microsoft</strong> profile won't be acquired by Internet Access either — Microsoft-profile bypasses supersede it. True exceptions go in <span class="k">Internet Access → View policies → Custom Bypass</span> (FQDN / IP / port). Also note: a forwarding profile enabled for the <em>first</em> time starts with zero users; a profile that was <em>already</em> on applies to <strong>all users</strong> by default — scope it with group assignment before you flip it if you don't want tenant-wide.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">03</span>Create a web content filtering policy</h2>
+<p class="sub">The block/allow rules — by web category or by FQDN.</p>
+
+<p>Under <strong>Global Secure Access → Secure → Web content filtering policies → Create policy</strong>, you build rules whose destination is either a <strong>Web Category</strong> (e.g. the liability and high-bandwidth categories you want blocked) or a specific <strong>FQDN</strong> (to block or allow an individual site). Filtering enforces on the <strong>URL for HTTP</strong> and the <strong>SNI (Server Name Indication) for HTTPS</strong> — so it works on encrypted traffic without full decryption.</p>
+
+<pre class="code"><span class="muted"># a filtering policy is a named set of rules</span>
+Policy: "Baseline-Block"   Action: Block
+  Rule 1  Destination type: Web Category
+          → Adult, Gambling, Hacking, Illegal Drugs, Weapons,
+            Violence, Nudity, Crypto Mining, ... (liability set)
+          → Image Sharing, Download Sites          (high-bandwidth set)
+  Rule 2  Destination type: FQDN
+          → block a specific site by name, if needed</pre>
+
+<p>Split the blocked set mentally into <strong>liability/risk</strong> categories (adult, gambling, hacking, drugs, weapons, violence, hate) and <strong>high-bandwidth</strong> categories (image sharing, download sites). Keeping them separate makes the policy trivial to justify to leadership and easy to reason about later. Everything not blocked is allowed by default, so productivity sites are never touched.</p>
+
+<h2 class="head"><span class="num">04</span>Bundle policies into a security profile</h2>
+<p class="sub">Profiles are containers — and priority ordering matters.</p>
+
+<p>A <strong>security profile</strong> (<span class="k">Secure → Security profiles</span>) groups one or more filtering policies and is the object Conditional Access actually links to. Policies within a profile are evaluated by <strong>priority number</strong> — <span class="k">100</span> is highest, <span class="k">65000</span> lowest — and <em>evaluation stops at the first matching rule</em>, exactly like firewall rules.</p>
+
+<pre class="code"><span class="muted"># security profile = ordered container of filtering policies</span>
+Profile: "Baseline"
+  priority 100    Allow-Exceptions   (allow specific business FQDNs first)
+  priority 200    Baseline-Block     (the category blocks)
+  <span class="muted"># leave ~100 spacing between priorities for future inserts</span></pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>The Baseline profile always applies</h3>
+    <p>There's a special <strong>baseline security profile</strong> that enforces at the lowest priority as a catch-all for <em>all</em> Internet Access traffic — and it runs <strong>even if no Conditional Access policy links to it</strong>, and even when another CA policy links a different profile. Put your organisation-wide "block the clearly-unwanted" rules here so they apply to everyone by default, and use linked profiles for group-specific additions.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">05</span>Link the profile via Conditional Access <span class="rk rk-high">the crux</span></h2>
+<p class="sub">Conditional Access is the delivery mechanism that makes filtering user-aware.</p>
+
+<p>This is the step that surprises people: a (non-baseline) security profile reaches specific users through a <strong>Conditional Access session control</strong>. The CA policy targets your user/group scope, points its target resource at Global Secure Access, and under <em>Session</em> applies the security profile.</p>
+
+<pre class="code"><span class="muted"># the CA policy that delivers the profile</span>
+Entra ID &gt; Conditional Access &gt; New policy
+  Assignments  Users:  &lt;pilot group&gt;   → later, All users
+  Target       Target resources: "All internet resources
+                                   with Global Secure Access"
+  Session      ✔ Use Global Secure Access security profile
+               → select your "Baseline" profile
+  Enable       On  → Create</pre>
+
+<p>Under the hood: the client authenticates to Entra (seamless if a valid PRT exists), Conditional Access evaluates and <strong>attaches the security profile to the access token</strong>, a tunnel is established to the SSE, and the edge enforces the profile's rules in priority order — stopping at the first match. Block returns an error (HTTP) or a connection reset (HTTPS); allow forwards to the destination.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Scope with a group on day one</h3>
+    <p>Because enforcement is a CA session control, the blast radius is whatever you target. Start the CA policy against a small <strong>pilot group</strong> — going straight to "All users" means one mis-scoped category can block the whole company at once. And group assignments require <strong>security-enabled</strong> groups; <strong>nested groups are not supported</strong> — members must be direct.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">06</span>Verify enforcement</h2>
+<p class="sub">Confirm the client is tunneling and the policy actually blocks.</p>
+
+<p>All verification is in the portal and on the client — no scripting needed:</p>
+
+<pre class="code"><span class="muted"># on the endpoint</span>
+- GSA client tray → Advanced Diagnostics
+  → confirm the Internet Access forwarding profile is active
+  → confirm traffic flows are being captured
+
+<span class="muted"># test</span>
+- browse to a site in a BLOCKED category
+  → HTTP  = plain-text error
+  → HTTPS = connection reset
+- browse to an allowed site → loads normally
+
+<span class="muted"># in the portal</span>
+- Global Secure Access → Monitor → Traffic logs
+  → see allowed vs blocked decisions per request</pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Mind the propagation timing</h3>
+    <p>Web content filtering changes usually apply within <strong>~5 minutes</strong>, but changes made through <strong>Conditional Access can take up to an hour</strong>. If a test doesn't reflect a change immediately, confirm which layer you changed before assuming it's broken — and if nothing blocks at all, re-check the client gotchas from step 1 (QUIC is the usual suspect).</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">07</span>Phased rollout &amp; exceptions</h2>
+<p class="sub">Widen the assignment, not the policy.</p>
+
+<p>Because enforcement is a CA session control (and the baseline profile covers everyone), rollout is mostly <em>widening the CA policy's user assignment</em> in stages — the filtering rules never change:</p>
+
+<pre class="code">Phase 1  pilot: a couple of named users     → validate, watch for over-blocks
+Phase 2  one user per department            → surface dept-specific site needs
+Phase 3  All users, firm-wide               → baseline enforced everywhere
+Phase 4  per-department custom profiles      → e.g. streaming/social limits
+                                               for specific groups (optional)</pre>
+
+<p>For <strong>exceptions</strong>, don't weaken the baseline — layer a separate filtering policy (allow a business-critical FQDN, or add extra blocks) into a profile scoped to just that group via its own CA policy. A business-critical site caught by a category block gets an allow rule at a higher priority in a targeted profile; a team that shouldn't have streaming gets an extra block in theirs.</p>
+
+<div class="takeaway">
+  <p class="tag">The end-to-end shape</p>
+  <p>Prepare the client (QUIC off, IPv4, no secure DNS) → deploy the GSA client via Intune → enable the Internet Access forwarding profile → build web content filtering policies (category or FQDN) → bundle them into a security profile with sane priorities → <strong>deliver it to users with a Conditional Access session control</strong>, while the baseline profile covers everyone by default. Verify with Advanced Diagnostics + Traffic logs, roll out by widening the CA assignment, and handle exceptions with layered profiles rather than weakening the baseline. Enforcement follows identity, so protection travels with the user.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/entra/global-secure-access/overview-what-is-global-secure-access">What is Global Secure Access — Microsoft Learn</a><span>the SSE platform overview</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/global-secure-access/how-to-configure-web-content-filtering">Configure web content filtering</a><span>filtering policies and security profiles</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/global-secure-access/how-to-configure-quic">QUIC / client networking considerations</a><span>the client-side prerequisites</span></li>
+  <li><a href="/posts/travel-geofencing.html">Geo-fencing that lets people travel</a><span>another Conditional Access-driven control</span></li>
+</ul>
+</div>
+
+<p class="disclaimer" style="color:var(--ink-3);font-size:13px;margin-top:28px">Anonymized from real deployment work; organisation, group, and user names have been removed. Product behaviour reflects Entra Internet Access as configured in 2025 and may change.</p>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/cloud/">Cloud Security</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>
