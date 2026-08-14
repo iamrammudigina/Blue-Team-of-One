@@ -389,3 +389,6 @@ noscript .sw-panel{display:block; border-bottom:1px solid var(--line); padding-b
 
 /* Cloud Security tile tint (v21) */
 .tile.t-violet{background:linear-gradient(140deg,#EEE9FF,#FFFFFF 58%)}  .tile.t-violet .t-ico{background:#E6DEFB; color:#6D28D9}
+
+/* SOC Operations tile tint (v22) */
+.tile.t-slate{background:linear-gradient(140deg,#EAEEF4,#FFFFFF 58%)}  .tile.t-slate .t-ico{background:#E1E7F0; color:#3F5876}

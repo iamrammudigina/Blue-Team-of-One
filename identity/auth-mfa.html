@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/style.css?v=21">
+<link rel="stylesheet" href="/assets/style.css?v=22">
 </head>
 <body>
 <header class="site-head">
@@ -18,6 +18,7 @@
       <span class="tag">field notes · security</span>
     </a>
     <nav class="site-nav">
+      <a href="/soc/">SOC</a>
       <a href="/ir/">IR</a>
       <a href="/identity/" aria-current="page">Identity</a>
       <a href="/endpoint/">Endpoint</a>
@@ -39,6 +40,12 @@
       <p class="tagline">Auth methods, registration gaps, and the road to passwordless.</p>
     </div>
     <div class="plist">
+      <a class="prow" href="/posts/entra-password-protection.html">
+        <div class="meta"><span class="fmt deep">Deep dive</span><span class="date">August 14, 2026</span></div>
+        <h3>The password nobody can set: Entra Password Protection, end to end</h3>
+        <p>How on-prem Entra Password Protection blocks weak passwords — proxy servers, the DC agent, SCP discovery, SYSVOL caching — plus the scoring algorithm that decides accept or reject, with worked examples.</p>
+        <span class="more">Read →</span>
+      </a>
       <a class="prow" href="/posts/passwordless-windows-deployment.html">
         <div class="meta"><span class="fmt deep">Deep dive</span><span class="date">August 14, 2026</span></div>
         <h3>Going passwordless on Windows, end to end</h3>
