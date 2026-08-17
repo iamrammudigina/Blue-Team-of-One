@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Killing standing admin: tiered privileged access with PIM — Blue Team of One</title>
+<meta name="description" content="Moving every privileged role off standing, direct-to-user assignments and onto just-in-time access with PIM — the tiered group model, the exact PowerShell/Graph commands end to end, break-glass first, and every gotcha that bites you along the way.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=22">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/" aria-current="page">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/identity/">Identity Security</a><span class="sep">›</span><a href="/identity/privileged-access.html">Privileged access</a></p>
+    <p class="eyebrow"><span class="dot"></span>Identity · privileged access</p>
+    <h1>Killing standing admin: <em>tiered privileged access with PIM</em></h1>
+    <p class="lede">Every tenant I inherit has the same disease: someone holds Global Administrator permanently, others hold six or seven roles "just in case," and nobody can tell you why. Convenient — right up until one of those accounts gets phished, and the blast radius is the whole tenant. This is the full walkthrough for moving every privileged role onto just-in-time access: concept, the exact commands, and every place it bites.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 17, 2026</span>
+      <span>~16 min read · playbook</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>This is the walkthrough for fixing standing admin properly — moving every privileged role off direct-to-user assignments and onto <strong>just-in-time</strong> access that people activate only when they need it. It's the same pattern I now roll out to every tenant I manage. Concept first, then the exact commands, including all the places it bites you, because it bit me in every one of them.</p>
+
+<h2 class="head"><span class="num">01</span>The concept</h2>
+<p class="sub">Two ideas do all the work.</p>
+
+<p><strong>1. Nobody holds admin at rest.</strong> Instead of a user <em>having</em> Global Administrator, they're <em>eligible</em> for it. When they need it, they activate through Privileged Identity Management (PIM) — with MFA, a justification, and (for the crown-jewel roles) an approval. The grant is time-bound and expires on its own. Phish a dormant account and there's no standing admin to steal.</p>
+
+<p><strong>2. Access is assigned to groups, not people.</strong> You build a small number of <strong>role-assignable security groups</strong> and assign the roles to those. A person's access is entirely determined by which group they're in. Onboarding is "add to one group," offboarding is "remove from one group," and your access review is "look at three groups" instead of auditing hundreds of individual assignments.</p>
+
+<p>Layer those two together into tiers:</p>
+
+<pre class="code">L1 Read      reader roles                          standing is fine (read-only)
+L2 Operator  readers + day-to-day admin            readers standing, admin ELIGIBLE
+L3 Admin     readers + L2 admin + tenant-owning    readers standing, admin ELIGIBLE</pre>
+
+<p>Two design choices worth calling out, because they're not obvious:</p>
+
+<table class="cmp">
+  <tr><th>Choice</th><th>Why</th></tr>
+  <tr><td><strong>Readers can stay standing</strong></td><td>Read-only roles don't change anything, so permanent Global Reader / Security Reader is an acceptable risk and saves everyone the friction of activating just to <em>look</em>. Everything that can <em>change</em> something is eligible-only.</td></tr>
+  <tr><td><strong>Tiers are cumulative, not nested</strong></td><td>You'd think you could nest L1 inside L2 inside L3. You can't — Entra role-assignable groups <strong>cannot be nested</strong>. So each tier group is assigned the <em>union</em> of its own roles plus every tier below it. A person is in exactly one group and gets the full stack for their level.</td></tr>
+</table>
+
+<div class="analogy">
+  <p class="tag">A naming note, to avoid confusion</p>
+  <p>I use <strong>L3 = most senior = most access</strong>. That's the inverse of Microsoft's own admin-tier model, where <strong>Tier 0</strong> is the most privileged. Same idea, opposite numbers.</p>
+</div>
+
+<h2 class="head"><span class="num">02</span>Prerequisites</h2>
+<p class="sub">Without these, eligible assignments simply fail.</p>
+
+<table class="cmp">
+  <tr><th>Requirement</th><th>Why</th></tr>
+  <tr><td><strong>Entra ID P2</strong></td><td>PIM eligibility and activation policies require it. Without P2, eligible assignments fail and you're stuck with standing access.</td></tr>
+  <tr><td><strong>PowerShell 7</strong></td><td>The Graph SDK is heavy and noticeably more fragile on Windows PowerShell 5.1. Use <span class="k">pwsh</span> (<span class="k">winget install Microsoft.PowerShell</span>).</td></tr>
+  <tr><td><strong>Rights</strong></td><td>Privileged Role Administrator or Global Administrator.</td></tr>
+  <tr><td><strong>Modules</strong></td><td>Graph Authentication, Identity.Governance, Groups, Users.</td></tr>
+</table>
+
+<pre class="code">Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+foreach ($m in 'Microsoft.Graph.Authentication','Microsoft.Graph.Identity.Governance','Microsoft.Graph.Groups','Microsoft.Graph.Users') {
+    if (-not (Get-Module -ListAvailable -Name $m)) { Install-Module $m -Scope CurrentUser -Force -AllowClobber }
+}
+Connect-MgGraph -NoWelcome -Scopes @(
+    'RoleManagement.ReadWrite.Directory','RoleManagementPolicy.ReadWrite.Directory',
+    'Group.ReadWrite.All','User.ReadWrite.All','Directory.Read.All'
+)</pre>
+
+<h2 class="head"><span class="num">03</span>Break-glass first — non-negotiable <span class="rk rk-high">do this first</span></h2>
+<p class="sub">The moment Global Administrator becomes eligible-only, one bad policy can lock everyone out.</p>
+
+<p>Before touching anything, stand up two emergency accounts that live <em>outside</em> the whole system. A single misconfigured Conditional Access policy or PIM setting can lock <strong>everyone</strong> out — these are your fire escape.</p>
+
+<pre class="code">$OnMicrosoftDomain = 'contoso.onmicrosoft.com'
+$gaId = (Get-MgRoleManagementDirectoryRoleDefinition -Filter "displayName eq 'Global Administrator'").Id
+
+function New-StrongPassword {
+    $chars = (48..57)+(65..90)+(97..122)+(33,35,37,42,43,45,61,63,64,95)
+    -join (1..32 | ForEach-Object { [char]($chars | Get-Random) })
+}
+
+1..2 | ForEach-Object {
+    $upn = "bg-emergency-$_@$OnMicrosoftDomain"
+    if (-not (Get-MgUser -Filter "userPrincipalName eq '$upn'" -All)) {
+        $pwd = New-StrongPassword
+        $u = New-MgUser -BodyParameter @{
+            accountEnabled=$true; displayName="Break Glass $_"
+            userPrincipalName=$upn; mailNickname="bg-emergency-$_"
+            passwordProfile=@{ password=$pwd; forceChangePasswordNextSignIn=$false }
+        }
+        New-MgRoleManagementDirectoryRoleAssignment -PrincipalId $u.Id -RoleDefinitionId $gaId -DirectoryScopeId '/' | Out-Null
+        Write-Host "CREATED $upn — vault this password: $pwd" -ForegroundColor Magenta
+    }
+}</pre>
+
+<p>Then, by hand: exclude both accounts from <strong>every</strong> Conditional Access policy, keep them <strong>out</strong> of PIM and every tier group (they stay permanent-active GA), store the credentials split and offline, and test a sign-in once. Build them before you start the fire.</p>
+
+<h2 class="head"><span class="num">04</span>Create the tier groups</h2>
+<p class="sub">Three role-assignable security groups.</p>
+
+<pre class="code">function Ensure-RoleAssignableGroup([string]$name) {
+    $g = Get-MgGroup -Filter "displayName eq '$name'" -All | Select-Object -First 1
+    if ($g) { return $g }
+    $g = New-MgGroup -DisplayName $name -MailNickname ($name -replace '[^a-zA-Z0-9]','') `
+            -SecurityEnabled:$true -MailEnabled:$false -IsAssignableToRole:$true -GroupTypes @()
+    Start-Sleep -Seconds 8   <span class="muted"># let it replicate before assigning roles (see gotchas)</span>
+    $g
+}
+$gL1 = Ensure-RoleAssignableGroup "Tier L1 - Read"
+$gL2 = Ensure-RoleAssignableGroup "Tier L2 - Operator"
+$gL3 = Ensure-RoleAssignableGroup "Tier L3 - Admin"</pre>
+
+<p><span class="k">IsAssignableToRole</span> is set at creation and can't be changed later. The group must be security-enabled, not mail-enabled, with empty <span class="k">GroupTypes</span>.</p>
+
+<h2 class="head"><span class="num">05</span>Assign the cumulative roles</h2>
+<p class="sub">Readers active, everything that can change something eligible.</p>
+
+<p>I resolve role IDs by display name so a mistyped GUID can't silently assign the wrong role.</p>
+
+<pre class="code">$RoleId = @{}
+Get-MgRoleManagementDirectoryRoleDefinition -All | ForEach-Object { $RoleId[$_.DisplayName] = $_.Id }
+
+$L1 = 'Global Reader','Security Reader','Reports Reader','Message Center Reader'
+$L2 = 'Security Operator','Helpdesk Administrator','Authentication Administrator',
+      'Groups Administrator','Teams Administrator','SharePoint Administrator',
+      'Intune Administrator','Exchange Administrator','Compliance Administrator',
+      'Attack Simulation Administrator'
+$L3 = 'Global Administrator','Privileged Role Administrator',
+      'Privileged Authentication Administrator','Security Administrator',
+      'Conditional Access Administrator','Application Administrator',
+      'Cloud Application Administrator','User Administrator'
+
+function Set-ActiveRole($gid,$name){ $rid=$RoleId[$name]
+    if(-not (Get-MgRoleManagementDirectoryRoleAssignment -Filter "principalId eq '$gid' and roleDefinitionId eq '$rid'" -All)){
+        New-MgRoleManagementDirectoryRoleAssignment -PrincipalId $gid -RoleDefinitionId $rid -DirectoryScopeId '/' | Out-Null } }
+
+function Set-EligibleRole($gid,$name){ $rid=$RoleId[$name]
+    if(-not (Get-MgRoleManagementDirectoryRoleEligibilityScheduleInstance -Filter "principalId eq '$gid' and roleDefinitionId eq '$rid'" -All)){
+        New-MgRoleManagementDirectoryRoleEligibilityScheduleRequest -BodyParameter @{
+            Action='AdminAssign'; PrincipalId=$gid; RoleDefinitionId=$rid; DirectoryScopeId='/'
+            Justification='Tiered access provisioning'
+            ScheduleInfo=@{ StartDateTime=(Get-Date).ToUniversalTime().ToString('o'); Expiration=@{ Type='NoExpiration' } }
+        } | Out-Null } }
+
+$L1 | ForEach-Object { Set-ActiveRole $gL1.Id $_ }
+$L1 | ForEach-Object { Set-ActiveRole   $gL2.Id $_ }; $L2 | ForEach-Object { Set-EligibleRole $gL2.Id $_ }
+$L1 | ForEach-Object { Set-ActiveRole   $gL3.Id $_ }; ($L2+$L3) | ForEach-Object { Set-EligibleRole $gL3.Id $_ }</pre>
+
+<h2 class="head"><span class="num">06</span>Activation policies — the guardrails</h2>
+<p class="sub">Eligibility alone lets someone activate with no friction. The policy adds MFA, justification, a time limit, and approval.</p>
+
+<pre class="code">function Set-PimPolicy($name,$maxDuration,$requireApproval,$approverGroupId){
+    $rid=$RoleId[$name]
+    $pa=Get-MgPolicyRoleManagementPolicyAssignment -Filter "scopeId eq '/' and scopeType eq 'DirectoryRole' and roleDefinitionId eq '$rid'" | Select-Object -First 1
+    if(-not $pa){ Write-Warning "no PIM policy for $name (P2?)"; return }
+    $pid=$pa.PolicyId
+    $tgt=@{ '@odata.type'='#microsoft.graph.unifiedRoleManagementPolicyRuleTarget'; caller='EndUser'; operations=@('all'); level='Assignment' }
+
+    Update-MgPolicyRoleManagementPolicyRule -UnifiedRoleManagementPolicyId $pid -UnifiedRoleManagementPolicyRuleId 'Expiration_EndUser_Assignment' -BodyParameter @{
+        '@odata.type'='#microsoft.graph.unifiedRoleManagementPolicyExpirationRule'; id='Expiration_EndUser_Assignment'
+        isExpirationRequired=$true; maximumDuration=$maxDuration; target=$tgt } | Out-Null
+
+    Update-MgPolicyRoleManagementPolicyRule -UnifiedRoleManagementPolicyId $pid -UnifiedRoleManagementPolicyRuleId 'Enablement_EndUser_Assignment' -BodyParameter @{
+        '@odata.type'='#microsoft.graph.unifiedRoleManagementPolicyEnablementRule'; id='Enablement_EndUser_Assignment'
+        enabledRules=@('MultiFactorAuthentication','Justification'); target=$tgt } | Out-Null
+
+    if($requireApproval -and $approverGroupId){
+        $approvers=@(@{ '@odata.type'='#microsoft.graph.groupMembers'; id=$approverGroupId; description='L3 approvers' })
+        Update-MgPolicyRoleManagementPolicyRule -UnifiedRoleManagementPolicyId $pid -UnifiedRoleManagementPolicyRuleId 'Approval_EndUser_Assignment' -BodyParameter @{
+            '@odata.type'='#microsoft.graph.unifiedRoleManagementPolicyApprovalRule'; id='Approval_EndUser_Assignment'
+            setting=@{ '@odata.type'='#microsoft.graph.approvalSettings'; isApprovalRequired=$true; isApprovalRequiredForExtension=$false; isRequestorJustificationRequired=$true; approvalMode='SingleStage'
+                approvalStages=@(@{ '@odata.type'='#microsoft.graph.unifiedApprovalStage'; approvalStageTimeOutInDays=1; isApproverJustificationRequired=$true; escalationTimeInMinutes=0; isEscalationEnabled=$false; primaryApprovers=$approvers }) }
+            target=$tgt } | Out-Null
+    }
+}
+$L2 | ForEach-Object { Set-PimPolicy $_ 'PT8H' $false $null }
+$L3 | ForEach-Object { Set-PimPolicy $_ 'PT4H' $true  '&lt;approver-group-guid&gt;' }</pre>
+
+<p>This part of the Graph API is finicky about the <span class="k">@odata.type</span> and rule IDs. If a role errors here, its eligibility still works — only the guardrail didn't apply, which you can fix in the portal.</p>
+
+<h2 class="head"><span class="num">07</span>Put people in tiers, then verify</h2>
+<p class="sub">Adding someone to a group grants eligibility — prove the activation path works before you rely on it.</p>
+
+<pre class="code">$UserTierMap = @{ 'alice@contoso.com'='L3'; 'bob@contoso.com'='L2'; 'carol@contoso.com'='L1' }
+$Groups = @{ 'L1'=$gL1; 'L2'=$gL2; 'L3'=$gL3 }
+foreach($upn in $UserTierMap.Keys){
+    $g=$Groups[$UserTierMap[$upn]]; $u=Get-MgUser -Filter "userPrincipalName eq '$upn'" -All | Select-Object -First 1
+    if($u -and -not (Get-MgGroupMember -GroupId $g.Id -All | Where-Object Id -eq $u.Id)){
+        New-MgGroupMemberByRef -GroupId $g.Id -BodyParameter @{ '@odata.id'="https://graph.microsoft.com/v1.0/directoryObjects/$($u.Id)" }
+    }
+}</pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Do not skip verification</h3>
+    <p>Before you strip anyone's old access, have one person from each tier <strong>actually activate a role through the PIM portal</strong> and confirm it grants (and prompts for MFA / justification). Adding someone to a group grants <em>eligibility</em>; if the activation path is broken, you'll only find out when you've already deleted their standing access and they're locked out mid-shift.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">08</span>Strip the old standing assignments</h2>
+<p class="sub">Only now, once activation is proven, remove the legacy direct assignments.</p>
+
+<p>Always dry-run first, and <strong>protect</strong> your break-glass and any special accounts.</p>
+
+<pre class="code">$StripUsers = @('alice@contoso.com','bob@contoso.com','carol@contoso.com')
+$ProtectedDomains = @('contoso.onmicrosoft.com')      <span class="muted"># e.g. break-glass / billing domain</span>
+$Commit = $false                                       <span class="muted"># flip to $true to execute</span>
+
+function Is-Protected($upn){ if(-not $upn){return $true}; $l=$upn.ToLower()
+    foreach($d in $ProtectedDomains){ if($l.EndsWith('@'+$d)){return $true} }
+    if($l.StartsWith('bg-emergency-')){return $true}; return $false }
+
+$stripLower = $StripUsers | ForEach-Object { $_.ToLower() }
+foreach($name in ($L1+$L2+$L3)){
+    $rid=$RoleId[$name]; if(-not $rid){continue}
+    Get-MgRoleManagementDirectoryRoleAssignment -Filter "roleDefinitionId eq '$rid'" -ExpandProperty Principal -All | ForEach-Object {
+        $upn=$_.Principal.AdditionalProperties.userPrincipalName
+        if(-not $upn){return}; if(-not ($stripLower -contains $upn.ToLower())){return}
+        if(Is-Protected $upn){ Write-Host "[protected] $upn / $name" -ForegroundColor DarkGray; return }
+        if($Commit){ Remove-MgRoleManagementDirectoryRoleAssignment -UnifiedRoleAssignmentId $_.Id; Write-Host "removed: $upn / $name" -ForegroundColor Green }
+        else { Write-Host "[dry-run] would remove: $upn / $name" -ForegroundColor Yellow }
+    }
+}</pre>
+
+<h2 class="head"><span class="num">09</span>The gotchas — all real, all hit</h2>
+<p class="sub">This is the part the docs don't tell you.</p>
+
+<h3 style="font-family:'Space Grotesk';font-size:17px;margin:22px 0 6px">You cannot remove your own Global Administrator</h3>
+<p>Signed in as yourself, deleting your own GA fails with <em>"Removing self from Global Administrator built-in role is not allowed."</em> It doesn't matter whether your privilege comes from the direct assignment or a group activation — Entra keys off <em>who you're signed in as</em>. Fix: have another admin do it. They activate GA via their tier group, connect <strong>as themselves</strong>, and remove yours.</p>
+
+<h3 style="font-family:'Space Grotesk';font-size:17px;margin:22px 0 6px">The success message can lie</h3>
+<p>If your removal loop prints a "removed" line with <span class="k">Write-Host</span> right after the delete call, that line fires even when the delete threw. I "removed" my own GA four times before realising it was still there. Always re-query to confirm, don't trust the log line:</p>
+<pre class="code">Get-MgRoleManagementDirectoryRoleAssignment -Filter "principalId eq '$($me.Id)' and roleDefinitionId eq '$rid'" -All
+<span class="muted"># empty = actually gone</span></pre>
+
+<h3 style="font-family:'Space Grotesk';font-size:17px;margin:22px 0 6px">Cross-tenant partner grants look like bugs but aren't</h3>
+<p>If you're managed by an MSP, you may find an admin role assigned to a group you can't open — <span class="k">Get-MgGroupMember</span> returns a flat <strong>404</strong>. That's because the group lives in the <em>partner's</em> tenant, not yours. Confirm by checking the assignment's home org:</p>
+<pre class="code">Get-MgRoleManagementDirectoryRoleAssignment -Filter "roleDefinitionId eq '$rid'" -All |
+  Where-Object { $_.AdditionalProperties.principalOrganizationId } |
+  ForEach-Object { $_.AdditionalProperties.principalOrganizationId }</pre>
+<p>A <span class="k">principalOrganizationId</span> different from your tenant = a delegated-admin grant. Then check whether it's the modern GDAP model or legacy DAP:</p>
+<pre class="code">Get-MgTenantRelationshipDelegatedAdminRelationship -All | Select-Object DisplayName, Status</pre>
+<p>Relationships listed = GDAP (manage it in Partner Center). Nothing listed but a cross-tenant assignment exists = <strong>legacy DAP</strong>, which Microsoft is retiring. Either way, <strong>do not delete it from your own tenant</strong> — it re-syncs or orphans. Manage it partner-side, and in an audit, <em>disclose and label it</em> rather than hiding it.</p>
+
+<h3 style="font-family:'Space Grotesk';font-size:17px;margin:22px 0 6px">The original-domain admin</h3>
+<p>Lots of tenants have a standing GA on the very first <span class="k">*.onmicrosoft.com</span> domain, often tied to billing. Don't strip it blind — confirm what uses it, and consider dropping it to Billing Administrator if it doesn't truly need GA. Protect it in the strip script until you know.</p>
+
+<h3 style="font-family:'Space Grotesk';font-size:17px;margin:22px 0 6px">PowerShell version traps</h3>
+<p>If you're on 5.1, PS7-only syntax detonates: the ternary <span class="k">? :</span>, the null-conditional <span class="k">?.</span>, and calling <span class="k">.ToLower()</span> on an array all throw parser errors. Either run in <span class="k">pwsh</span> or write it 5.1-safe with <span class="k">if/else</span>, explicit null guards, and <span class="k">| ForEach-Object { $_.ToLower() }</span>.</p>
+
+<h3 style="font-family:'Space Grotesk';font-size:17px;margin:22px 0 6px">Small operational ones</h3>
+<table class="cmp">
+  <tr><th>Symptom</th><th>Fix</th></tr>
+  <tr><td><span class="k">running scripts is disabled</span></td><td><span class="k">Set-ExecutionPolicy -Scope CurrentUser RemoteSigned</span>, or <span class="k">Unblock-File .\script.ps1</span> for a single downloaded file</td></tr>
+  <tr><td><span class="k">The paging file is too small</span> launching the Graph SDK</td><td>You're out of RAM; close apps, raise the page file, reboot</td></tr>
+  <tr><td>WAM auth popup won't complete</td><td><span class="k">Set-MgGraphOption -DisableLoginByWAM $true</span></td></tr>
+  <tr><td>Role assignment fails right after creating the group</td><td>Replication lag; sleep a few seconds and re-run (all the code above is idempotent)</td></tr>
+</table>
+
+<div class="takeaway">
+  <p class="tag">What you're left with</p>
+  <p>No standing admin. Every privileged role is activated on demand, with MFA and a justification, and it expires on its own. Onboarding and offboarding are a single group change. Your entire privileged-access surface is three groups you can hand an auditor. And the one or two standing accounts that remain — break-glass and, where it applies, a partner path — are <em>deliberate, documented, and disclosed</em>, not accidents nobody remembered. The goal was never zero privileged access. It's that every bit of it exists on purpose.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-configure">What is Privileged Identity Management — Microsoft Learn</a><span>eligibility, activation, and policies</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/groups-concept">Role-assignable groups in Entra ID</a><span>the group model this relies on</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/security-emergency-access">Manage emergency access accounts</a><span>the break-glass pattern</span></li>
+  <li><a href="/posts/token-protection.html">Why a stolen token dies on the wrong laptop</a><span>the token side of privileged-access defence</span></li>
+</ul>
+</div>
+
+<p class="disclaimer" style="color:var(--ink-3);font-size:13px;margin-top:28px">Anonymized from real deployment work; tenant, domain, and user names are generic examples. Test in a lab and dry-run every destructive step before running against production.</p>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/identity/">Identity</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>
