@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Temporary Access Pass is a loaded gun: using it without shooting yourself — Blue Team of One</title>
+<meta name="description" content="A Temporary Access Pass isn't an MFA bypass — it's a strong credential that can bootstrap persistent access, which is exactly why it's dangerous. The real risks, and the tight policy, scoping, and Conditional Access controls that keep TAP from becoming your weakest link.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=22">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/" aria-current="page">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/identity/">Identity Security</a><span class="sep">›</span><a href="/identity/auth-mfa.html">Authentication &amp; MFA</a></p>
+    <p class="eyebrow"><span class="dot"></span>Authentication · risk &amp; mitigation</p>
+    <h1>Temporary Access Pass is a loaded gun: <em>using it without shooting yourself</em></h1>
+    <p class="lede">People call TAP an "MFA bypass." It isn't — and that misunderstanding is exactly what makes it dangerous, because teams either ban it or wave it through without controls. A TAP is a strong credential that can <strong>bootstrap other credentials</strong>. Issued carelessly, it's a clean path to persistent access on any account it touches. Here's the real risk model, and how to configure it so it doesn't become your softest target.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 17, 2026</span>
+      <span>~12 min read · risk &amp; mitigation</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>A Temporary Access Pass is a time-limited passcode an admin issues so a user can sign in and register other authentication methods — onboard a new hire, recover a locked-out account, bootstrap passwordless. Useful. But the framing most people carry ("it skips MFA") is wrong in a way that hides the actual danger. Let's fix the model first, because the mitigations only make sense once you see what you're really defending against.</p>
+
+<h2 class="head"><span class="num">01</span>It's not an MFA bypass — it's worse</h2>
+<p class="sub">A TAP satisfies MFA as a strong credential. That's the problem, not the reassurance.</p>
+
+<p>A TAP doesn't <em>skip</em> multi-factor auth — it satisfies it, counting as a strong credential in its own right. That sounds reassuring until you follow the consequence: because it's strong enough to authenticate, it's strong enough to <strong>register new authentication methods</strong>. A TAP is a credential whose entire purpose is to mint <em>other</em> credentials.</p>
+
+<div class="analogy">
+  <p class="tag">Why "bootstrap" is the scary word</p>
+  <p>Whoever holds a valid TAP for an account can sign in and enroll a passkey, register Authenticator, or set up Windows Hello — <em>their own</em>. That's not one session of access; it's <strong>persistent</strong> access that survives the TAP's expiry, because the attacker now owns a permanent method on the account. A stolen password gets you in until it's reset. A stolen TAP gets you in, lets you plant your own key, and then you don't need the TAP anymore.</p>
+</div>
+
+<p>This is not theoretical. Documented tradecraft includes creating a TAP from a compromised admin account to seize a target, and the service-desk social-engineering playbook that groups like Scattered Spider have run repeatedly — talk the help desk into issuing a credential, then register an attacker-controlled MFA device for persistence. TAP is a first-class tool for exactly that pattern.</p>
+
+<h2 class="head"><span class="num">02</span>The four risks, concretely</h2>
+<p class="sub">Name them so the controls have something to bite on.</p>
+
+<table class="cmp">
+  <tr><th>Risk</th><th>What it looks like</th></tr>
+  <tr><td><strong>Persistence bootstrap</strong></td><td>A leaked/stolen TAP is used to register the attacker's own passkey or Authenticator — access outlives the TAP</td></tr>
+  <tr><td><strong>Help-desk social engineering</strong></td><td>An attacker calls posing as a locked-out user; the agent issues a TAP over the phone; game over</td></tr>
+  <tr><td><strong>Privileged-account onboarding</strong></td><td>A TAP issued for an admin (or an account eligible for admin roles) hands over the crown jewels</td></tr>
+  <tr><td><strong>Over-long / reusable passes</strong></td><td>A multi-use, multi-day TAP is a durable shared secret — everything wrong with a temporary password, dressed up as modern</td></tr>
+</table>
+
+<h2 class="head"><span class="num">03</span>Lock the policy down to the floor</h2>
+<p class="sub">The defaults are generous. The allowed range is alarming. Configure deliberately.</p>
+
+<p>The TAP policy (Entra ID → Authentication methods → Policies → Temporary Access Pass) sets tenant-wide lifetime, one-time-use, and length. Here are Microsoft's defaults and — importantly — how far the range actually stretches:</p>
+
+<table class="cmp">
+  <tr><th>Setting</th><th>Default</th><th>Allowed range</th><th>What to set</th></tr>
+  <tr><td>Minimum lifetime</td><td>1 hour</td><td>10 min – 30 days</td><td>Keep low</td></tr>
+  <tr><td>Maximum lifetime</td><td>8 hours</td><td>10 min – <strong>30 days</strong></td><td>Cap at ~1 hour (8h max, not 30d)</td></tr>
+  <tr><td>Default lifetime</td><td>1 hour</td><td>10 min – 30 days</td><td>1 hour</td></tr>
+  <tr><td>One-time use</td><td><strong>False</strong></td><td>True / False</td><td><strong>True</strong> — enforce single-use</td></tr>
+  <tr><td>Length</td><td>8</td><td>8 – 48 characters</td><td>Leave at 8+ (longer for higher assurance)</td></tr>
+</table>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>The 30-day maximum is a trap, and one-time-use defaults to OFF</h3>
+    <p>That the maximum lifetime can be set to <strong>30 days</strong> tells you the guardrails are yours to build — a month-long, reusable passcode is a standing backdoor. Worse, <strong>one-time use defaults to False</strong>, meaning out of the box a TAP can be used repeatedly for its whole validity window. Set one-time use to <strong>True</strong> and cap the maximum lifetime to hours, not days. If you never lower these, you've left the barn door open by default.</p>
+  </div>
+</div>
+
+<pre class="code"><span class="muted"># create a strictly-scoped, single-use TAP (Graph PowerShell)</span>
+$props = @{ isUsableOnce = $true; lifetimeInMinutes = 60 } | ConvertTo-Json
+New-MgUserAuthenticationTemporaryAccessPassMethod -UserId newhire@contoso.com -BodyParameter $props
+
+<span class="muted"># audit: does this user currently have a TAP registered?</span>
+Get-MgUserAuthenticationTemporaryAccessPassMethod -UserId someone@contoso.com</pre>
+
+<h2 class="head"><span class="num">04</span>Scope it — and keep it away from admins</h2>
+<p class="sub">Enabling TAP tenant-wide for everyone is the mistake.</p>
+
+<p>The policy lets you include and exclude specific groups. Use that hard. TAP should be enabled only for the populations that genuinely need it — a controlled onboarding group, a trained recovery workflow — not switched on for the whole tenant by default.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Exclude privileged accounts from the TAP policy entirely</h3>
+    <p>The single highest-value control here: <strong>exclude your admin / privileged-role-eligible accounts from TAP scope</strong>. A TAP that can onboard a fresh credential onto a Global Administrator is the worst-case bootstrap. If a privileged user genuinely needs recovery, handle it as a deliberate, heavily-verified exception — not a standing capability. Note also <em>who can issue</em>: only Privileged Authentication Administrators can create a TAP for admins; ordinary Authentication Administrators can't. Keep that boundary, and keep the privileged-issuer role tightly held.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">05</span>Fence it with Conditional Access authentication strengths</h2>
+<p class="sub">Let TAP in for bootstrap — and nowhere else.</p>
+
+<p>Policy scoping controls <em>who can hold</em> a TAP; Conditional Access <strong>authentication strengths</strong> control <em>what a TAP is allowed to do</em>. The pattern that contains it:</p>
+
+<pre class="code"><span class="muted"># two custom authentication strengths</span>
+Bootstrap/Recovery strength   → INCLUDES Temporary Access Pass
+                                (scope: onboarding/recovery flows, registration)
+Normal sign-in strength       → EXCLUDES TAP; requires phishing-resistant
+                                (passkey / WHfB) for day-to-day access to resources</pre>
+
+<p>With this split, a TAP works for the narrow job of getting a user to the point where they can register a real, phish-resistant method — and is rejected everywhere else. It can't be used to walk into sensitive apps or admin portals. Roll the strengths out in <strong>report-only</strong> first so you see what a TAP would and wouldn't satisfy before you enforce.</p>
+
+<h2 class="head"><span class="num">06</span>The session outlives the pass — close that gap</h2>
+<p class="sub">A subtle one that surprises people: TAP expiry doesn't kill an existing session.</p>
+
+<p>You'd assume that when the TAP expires, access ends. It doesn't, entirely. Tokens issued during a TAP sign-in are capped at the TAP's expiration <em>at the moment of issuance</em> — but TAP expiry <strong>does not retroactively invalidate a session that's already established</strong>. Session lifetime is governed by Conditional Access, so a user (or attacker) who signed in with a TAP can retain access <em>longer than the TAP's lifetime</em> depending on your CA session config.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Pair TAP with a tight sign-in frequency</h3>
+    <p>To stop a TAP-established session from lingering, apply a short <strong>sign-in frequency</strong> to the flows where TAP is allowed, so the session is forced to re-authenticate (and can't ride on the expired pass). This is the same reason CAE matters for revocation — a credential going away doesn't automatically end the sessions it created. Don't assume "the TAP expired" means "the access is gone."</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">07</span>Issue and monitor like it's a privileged action</h2>
+<p class="sub">The process around the TAP matters as much as the policy.</p>
+
+<p>Even perfectly configured, a TAP is only as safe as the process that hands it out. The operational controls:</p>
+
+<table class="cmp">
+  <tr><th>Control</th><th>Why</th></tr>
+  <tr><td>Verify identity out-of-band before issuing</td><td>Kills the help-desk phone-call attack — never issue on a caller's say-so alone</td></tr>
+  <tr><td>Deliver over a secure channel</td><td>Never email/SMS a TAP in clear; use a secure ticketing / one-time-secret tool</td></tr>
+  <tr><td>Alert on every TAP creation</td><td>A TAP registered on a privileged (or unusual) account is a high-signal event — watch for it</td></tr>
+  <tr><td>Alert on TAP → new-method registration</td><td>A TAP sign-in immediately followed by a passkey/Authenticator enrolment is the persistence pattern</td></tr>
+  <tr><td>Expire and delete promptly</td><td>Don't leave used or stale TAPs lying on accounts</td></tr>
+</table>
+
+<p>Treat "a TAP was issued" and "a new auth method was registered right after a TAP sign-in" as detections, not just log lines — that sequence is precisely what an attacker's persistence step looks like, and it's the same telemetry you'd correlate in a linkable-token-identifier investigation.</p>
+
+<div class="takeaway">
+  <p class="tag">The takeaway</p>
+  <p>TAP isn't an MFA bypass — it's a strong credential that mints other credentials, which is <em>more</em> dangerous, not less. Contain it on every axis: lock the policy to short-lived, single-use passes (the 30-day, reusable defaults are a backdoor); scope it to onboarding/recovery groups and <strong>exclude privileged accounts</strong>; fence it with Conditional Access authentication strengths so it can bootstrap and nothing else; pair it with a tight sign-in frequency so the session doesn't outlive the pass; and verify identity out-of-band before issuing, with alerting on issuance and on the TAP→registration sequence. Used that way, TAP is a safe onboarding tool. Used the way it ships by default, it's your softest target.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/authentication/howto-authentication-temporary-access-pass">Configure a Temporary Access Pass — Microsoft Learn</a><span>policy settings, ranges, and roles</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/authentication/concept-authentication-strengths">Conditional Access authentication strengths</a><span>fencing what a TAP is allowed to do</span></li>
+  <li><a href="/posts/signin-frequency-cae.html">Sign-in frequency is a blunt instrument — CAE is the scalpel</a><span>closing the session-outlives-the-pass gap</span></li>
+  <li><a href="/posts/passwordless-windows-deployment.html">Going passwordless on Windows, end to end</a><span>the phish-resistant methods TAP should bootstrap</span></li>
+</ul>
+</div>
+
+<p class="disclaimer" style="color:var(--ink-3);font-size:13px;margin-top:28px">Anonymized from real deployment work; policy behaviour reflects Entra TAP as documented in 2026 and may change. Verify settings against current Microsoft guidance before enforcing.</p>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/identity/">Identity</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>
