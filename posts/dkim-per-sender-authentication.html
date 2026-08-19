@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The domain was authenticated. The newsletter still went to spam. — Blue Team of One</title>
+<meta name="description" content="A domain with SPF, DMARC and two working DKIM signers still had its bulk mail junked. The reason: DKIM is per-sender, not per-domain — and the fix is three DNS records, done in the right order.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=22">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/" aria-current="page">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/email/">Email Security</a><span class="sep">›</span><a href="/email/delivery.html">Delivery &amp; mail flow</a></p>
+    <p class="eyebrow"><span class="dot"></span>Deep dive · Email authentication</p>
+    <h1>The domain was <em>authenticated</em>. The newsletter still went to spam.</h1>
+    <p class="lede">A domain with clean SPF, an enforcing DMARC policy, and two working DKIM signers still had its mass mail junked at every mailbox. The reason catches almost everyone: DKIM is per-<em>sender</em>, not per-<em>domain</em>. Here's the whole chain, and the three-record fix done in the right order.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 19, 2026</span>
+      <span>~9 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>The ticket arrived as a deliverability complaint. A department at <span class="k">contoso.com</span> sent its newsletters and public notices through a marketing-email platform — call it <strong>Larkspur</strong> (anonymized) — and the mail was reliably landing in recipients' junk folders. Larkspur's own deliverability team had sent a notice that said, in effect: <em>your domain is not authenticated; set up DKIM signing and a DMARC record.</em></p>
+
+<p>That notice is where most of these go sideways. Taken at face value it tells you to bolt on authentication the domain supposedly lacks. But before touching a single DNS record, the first job is to check whether the claim is even true for this domain. It wasn't — and the gap between what the notice said and what was actually live is the whole lesson.</p>
+
+<h2 class="head"><span class="num">01</span>First move: verify the claim against live DNS</h2>
+<p class="sub">Deliverability notices are boilerplate. The zone is ground truth.</p>
+
+<p>Pulling the live records showed a domain that was already well-authenticated — not a bare one:</p>
+
+<pre class="code">contoso.com          TXT    "v=spf1 include:spf.protection.outlook.com ~all"
+_dmarc.contoso.com   TXT    "v=DMARC1; <b>p=quarantine</b>; pct=100; rua=mailto:...; fo=1"
+
+selector1._domainkey CNAME  selector1-contoso-com._domainkey.contoso.onmicrosoft.com
+selector2._domainkey CNAME  selector2-contoso-com._domainkey.contoso.onmicrosoft.com
+s1._domainkey        CNAME  s1.domainkey.<b>u-transactional-svc</b>.example.net
+s2._domainkey        CNAME  s2.domainkey.<b>u-transactional-svc</b>.example.net</pre>
+
+<p>So the domain had SPF, it had DMARC set to <span class="k">quarantine</span> (enforcing, not just monitoring), and it had <strong>two</strong> independent DKIM signers already published: Microsoft 365 (the <span class="k">selector1/2</span> records) and a separate transactional-email service used for receipts and system notifications (the <span class="k">s1/s2</span> records). The notice's line about "no DMARC record" was simply generic template text that didn't apply here.</p>
+
+<div class="analogy">
+  <p class="tag">Mental model</p>
+  <p>A vendor deliverability notice is a form letter, not a diagnosis. It's written for the worst-case customer with nothing configured. Read it as "something in your authentication doesn't cover <em>our</em> mail" — then go find out what — not as a literal to-do list.</p>
+</div>
+
+<p>Which raises the real question. If DKIM already works for two senders, why does a <em>third</em> sender's mail fail? The domain is clearly capable of DKIM. The instinct is to think authentication is a property of the domain — switch it on once and every sender is covered. That instinct is exactly wrong, and it's why this case is worth writing down.</p>
+
+<h2 class="head"><span class="num">02</span>The thing nobody internalizes: DKIM is per-sender</h2>
+<p class="sub">One domain, many independent signers — each with its own key.</p>
+
+<p>DKIM doesn't authenticate <em>a domain</em>. It authenticates <em>a stream of mail from one sending service</em>. Each service that sends on your behalf gets its own <strong>selector</strong> — a label under <span class="k">_domainkey</span> — pointing at that service's public key. The service holds the matching private key and signs the mail it sends; the receiver fetches the public key at the selector named in the signature and checks it. Different service, different selector, different key. They don't share, and one cannot cover another.</p>
+
+<figure>
+<svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="One domain publishes several DKIM selectors, each belonging to a different sending service. Microsoft 365 and a transactional service each have working selectors. The marketing platform has no selector published, so its mail is unsigned for the domain.">
+<g font-family="IBM Plex Sans,sans-serif">
+  <!-- domain node -->
+  <rect x="270" y="18" width="180" height="52" rx="12" fill="#0E1626" stroke="#24314B" stroke-width="1"/>
+  <text x="360" y="40" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="13" fill="#D6DEEA" font-weight="500">contoso.com</text>
+  <text x="360" y="57" text-anchor="middle" font-size="10" fill="#8593AC">one domain · one _domainkey namespace</text>
+
+  <!-- connectors -->
+  <path d="M320 70 C 260 96, 150 96, 120 118" fill="none" stroke="#8A93A1" stroke-width="1.3"/>
+  <path d="M345 70 C 330 100, 320 100, 315 118" fill="none" stroke="#8A93A1" stroke-width="1.3"/>
+  <path d="M400 70 C 470 96, 590 96, 610 118" fill="none" stroke="#A32D2D" stroke-width="1.3" stroke-dasharray="4 3"/>
+
+  <!-- sender 1: M365 -->
+  <rect x="18" y="120" width="200" height="96" rx="12" fill="#EDF3E0" stroke="#3B6D11" stroke-width="1"/>
+  <text x="36" y="144" font-size="12" font-weight="600" fill="#274F0A">Microsoft 365</text>
+  <text x="36" y="163" font-size="10.5" fill="#5A6472">day-to-day mailbox mail</text>
+  <text x="36" y="188" font-family="IBM Plex Mono,monospace" font-size="10" fill="#3B6D11">selector1/2._domainkey</text>
+  <text x="36" y="204" font-size="10.5" fill="#3B6D11" font-weight="600">✓ signs &amp; aligns</text>
+
+  <!-- sender 2: transactional -->
+  <rect x="228" y="120" width="200" height="96" rx="12" fill="#EDF3E0" stroke="#3B6D11" stroke-width="1"/>
+  <text x="246" y="144" font-size="12" font-weight="600" fill="#274F0A">Transactional svc</text>
+  <text x="246" y="163" font-size="10.5" fill="#5A6472">receipts, system notices</text>
+  <text x="246" y="188" font-family="IBM Plex Mono,monospace" font-size="10" fill="#3B6D11">s1/s2._domainkey</text>
+  <text x="246" y="204" font-size="10.5" fill="#3B6D11" font-weight="600">✓ signs &amp; aligns</text>
+
+  <!-- sender 3: marketing (missing) -->
+  <rect x="510" y="120" width="200" height="96" rx="12" fill="#FBE9E9" stroke="#A32D2D" stroke-width="1.4"/>
+  <text x="528" y="144" font-size="12" font-weight="600" fill="#7A1F1F">Larkspur (marketing)</text>
+  <text x="528" y="163" font-size="10.5" fill="#7A1F1F">newsletters, mass notices</text>
+  <text x="528" y="188" font-family="IBM Plex Mono,monospace" font-size="10" fill="#A32D2D">no selector published</text>
+  <text x="528" y="204" font-size="10.5" fill="#A32D2D" font-weight="600">✗ mail is unsigned</text>
+
+  <text x="360" y="248" text-anchor="middle" font-size="11.5" fill="#5A6472">Two senders are covered. The third has no key under <tspan font-family="IBM Plex Mono,monospace" fill="#0E1521">_domainkey</tspan> — so for its mail,</text>
+  <text x="360" y="266" text-anchor="middle" font-size="11.5" fill="#5A6472">the domain looks completely unauthenticated, no matter how healthy the other two are.</text>
+</g>
+</svg>
+<figcaption><b>Authentication is per sending service.</b> A domain can have several DKIM selectors, one per service that sends for it. Adding a new platform doesn't inherit the others' signing — it needs its own selector and key published, or its mail goes out unsigned.</figcaption>
+</figure>
+
+<p>Seen this way the failure is obvious. Larkspur was sending mail as <span class="k">contoso.com</span> but had no key published under the domain's <span class="k">_domainkey</span>. The existing selectors belonged to M365 and the transactional service and could not sign Larkspur's mail. So every newsletter left the building <strong>unsigned</strong> as far as the domain was concerned.</p>
+
+<h2 class="head"><span class="num">03</span>Why unsigned means junked — and why SPF can't save it</h2>
+<p class="sub">Follow the alignment, and the quarantine policy does the rest.</p>
+
+<p>An unsigned-for-the-domain message runs straight into DMARC. DMARC passes only if <em>at least one</em> of SPF or DKIM both passes <em>and</em> aligns with the visible <span class="k">From:</span> domain. Walk the two paths for Larkspur's mail:</p>
+
+<figure>
+<svg viewBox="0 0 720 262" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="For the marketing platform's mail, DKIM has no domain-aligned key so it cannot pass, and SPF authenticates the platform's own return-path domain rather than contoso.com so it does not align. With neither aligned, DMARC fails, and the quarantine policy sends the mail to spam.">
+<defs><marker id="ar2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#8A93A1" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<g font-family="IBM Plex Sans,sans-serif">
+  <!-- DKIM path -->
+  <rect x="8" y="20" width="330" height="70" rx="11" fill="#FBE9E9" stroke="#A32D2D" stroke-width="1"/>
+  <text x="26" y="44" font-size="12" font-weight="600" fill="#7A1F1F">DKIM</text>
+  <text x="26" y="63" font-size="10.5" fill="#5A2020">No key published for Larkspur under the domain.</text>
+  <text x="26" y="79" font-size="10.5" fill="#5A2020">Nothing to verify → <tspan font-weight="600">no pass, no alignment.</tspan></text>
+
+  <!-- SPF path -->
+  <rect x="8" y="98" width="330" height="86" rx="11" fill="#FBF1DC" stroke="#B0700C" stroke-width="1"/>
+  <text x="26" y="122" font-size="12" font-weight="600" fill="#6B430A">SPF</text>
+  <text x="26" y="141" font-size="10.5" fill="#5A4420">Larkspur sends with its <tspan font-weight="600">own</tspan> envelope return-path</text>
+  <text x="26" y="157" font-size="10.5" fill="#5A4420">(bounces.larkspur.example). SPF may pass —</text>
+  <text x="26" y="173" font-size="10.5" fill="#5A4420">but for <tspan font-weight="600">their</tspan> domain, not contoso.com → <tspan font-weight="600">no alignment.</tspan></text>
+
+  <!-- arrow to DMARC -->
+  <line x1="338" y1="102" x2="378" y2="102" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#ar2)"/>
+
+  <!-- DMARC verdict -->
+  <rect x="380" y="60" width="150" height="84" rx="11" fill="#FBE9E9" stroke="#A32D2D" stroke-width="1.4"/>
+  <text x="455" y="92" text-anchor="middle" font-size="13" font-weight="600" fill="#7A1F1F">DMARC</text>
+  <text x="455" y="112" text-anchor="middle" font-size="11" fill="#7A1F1F">neither aligned</text>
+  <text x="455" y="129" text-anchor="middle" font-size="12" font-weight="600" fill="#7A1F1F">FAIL</text>
+
+  <line x1="530" y1="102" x2="570" y2="102" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#ar2)"/>
+
+  <!-- policy -->
+  <rect x="572" y="60" width="140" height="84" rx="11" fill="#0E1626" stroke="#24314B" stroke-width="1"/>
+  <text x="642" y="88" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11" fill="#F2B8B8">p=quarantine</text>
+  <text x="642" y="110" text-anchor="middle" font-size="10.5" fill="#8593AC">receiver applies</text>
+  <text x="642" y="127" text-anchor="middle" font-size="11.5" font-weight="600" fill="#F2B8B8">→ Junk folder</text>
+
+  <text x="360" y="212" text-anchor="middle" font-size="11.5" fill="#5A6472">The domain's own enforcing policy is doing exactly what it was told: mail that can't prove it's</text>
+  <text x="360" y="230" text-anchor="middle" font-size="11.5" fill="#5A6472">really from contoso.com gets quarantined. The policy isn't the bug — the missing signature is.</text>
+</g>
+</svg>
+<figcaption><b>Two paths, neither aligned.</b> DKIM can't pass with no key; SPF may pass but authenticates the platform's return-path domain, not the From domain, so it doesn't align. DMARC needs one aligned pass and gets none — and <span class="k">p=quarantine</span> sends the result to spam.</figcaption>
+</figure>
+
+<p>This is also why <strong>you don't fix this by editing SPF</strong>. The tempting move is to add Larkspur to the SPF record. It won't help: bulk platforms send with their own envelope return-path, so SPF authenticates <em>their</em> domain. DMARC requires the passing mechanism to align with the visible From domain, and a return-path of <span class="k">larkspur.example</span> never aligns with <span class="k">contoso.com</span>. The only mechanism that produces an aligned pass here is DKIM signed as the From domain — which is precisely the record the platform is asking you to publish.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>An enforcing DMARC policy makes new senders fail loudly</h3>
+    <p>On a domain at <span class="k">p=none</span>, an unsigned new sender still reaches the inbox — the problem hides. At <span class="k">p=quarantine</span> or <span class="k">p=reject</span>, every unauthenticated stream is visibly junked or bounced the moment it starts. That's the policy working as designed, but it means <em>onboarding a new sending platform is a DNS task, not a "just start sending" task.</em> Publish the sender's DKIM first, then turn on the campaigns.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">04</span>The fix: three records, and a collision check first</h2>
+<p class="sub">One verification token, two DKIM selectors — all additive.</p>
+
+<p>The platform's domain-authentication page hands you the records to publish: a TXT verification token (it proves you control the domain, so the platform will activate signing) and two CNAME selectors that point at the platform's public keys. Genericized, they look like this:</p>
+
+<table class="ref">
+  <tr><td class="c">TXT</td><td><span class="k">@</span> → <span class="k">larkspur-verify-XXXXXXX</span> — ownership token, activates signing on the platform side.</td></tr>
+  <tr><td class="c">CNAME</td><td><span class="k">larkspur.k1._domainkey</span> → <span class="k">k1.dkim.larkspur.example</span> — DKIM key 1.</td></tr>
+  <tr><td class="c">CNAME</td><td><span class="k">larkspur.k2._domainkey</span> → <span class="k">k2.dkim.larkspur.example</span> — DKIM key 2.</td></tr>
+</table>
+
+<p>Before adding anything, check every proposed name against the live zone. All three here are new: the platform uses its own selector prefix (<span class="k">larkspur.k1/k2._domainkey</span>), which is distinct from the M365 selectors (<span class="k">selector1/2</span>) and the transactional ones (<span class="k">s1/s2</span>). Nothing overwrites, nothing collides. Just as important: the TXT token is <em>added</em> as a new record at the apex — it does not replace the existing SPF TXT. Multiple apex TXT records coexist normally; the classic mistake is editing SPF when you meant to add a sibling record.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>The double-suffix gotcha</h3>
+    <p>Most DNS hosts append the zone automatically. Enter the selector <em>host-only</em> — <span class="k">larkspur.k1._domainkey</span> — not the fully-qualified name. Type the FQDN and you get <span class="k">larkspur.k1._domainkey.contoso.com.contoso.com</span>, which resolves to nothing and fails verification with no obvious cause. When a freshly-added CNAME "just won't verify," a doubled zone suffix is the first thing to check.</p>
+  </div>
+</div>
+
+<p>Save the three records, then return to the platform's page and click <strong>Verify</strong>. Verification reads the records back; platforms typically re-check for up to 24 hours, so a "not verified yet" immediately after saving is expected, not a failure. Once it flips to verified, the platform starts DKIM-signing outbound mail as the domain, DMARC gets its aligned pass, and campaigns land in the inbox. The change is forward-looking — it doesn't rescue mail already sitting in someone's junk folder.</p>
+
+<h2 class="head"><span class="num">05</span>What did — and didn't — change</h2>
+<p class="sub">A third authenticated sender, and nothing else touched.</p>
+
+<p>The whole change is additive. M365 mail keeps signing with <span class="k">selector1/2</span>; the transactional service keeps signing with <span class="k">s1/s2</span>; SPF, DMARC and MX are untouched. You've added a third authenticated sender alongside the two that already worked — not modified either of them. That also makes rollback trivial: delete the three records and the zone is byte-for-byte back to where it started. Low-risk changes still deserve the discipline, though — this is production DNS on a domain the client owns, so it goes out with written approval and a confirmation that the client actually owns the sending account before anything is published.</p>
+
+<div class="takeaway">
+  <p class="tag">The one-line model</p>
+  <p>"My domain is authenticated" is the wrong unit. Authentication is per <em>sending service</em> — every new platform that sends as your domain needs its own DKIM key published, or an enforcing DMARC policy will quietly junk everything it sends.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://datatracker.ietf.org/doc/html/rfc6376">RFC 6376 — DomainKeys Identified Mail (DKIM)</a><span>selectors, keys, and signing</span></li>
+  <li><a href="https://datatracker.ietf.org/doc/html/rfc7489">RFC 7489 — DMARC</a><span>alignment and the pass/fail logic</span></li>
+  <li><a href="https://datatracker.ietf.org/doc/html/rfc7208">RFC 7208 — Sender Policy Framework (SPF)</a><span>why the return-path domain is what SPF checks</span></li>
+  <li><a href="https://dmarc.org/overview/">dmarc.org — Overview</a><span>how SPF, DKIM and DMARC fit together</span></li>
+</ul>
+</div>
+
+</div>
+</article>
+
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/email/">Email</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>
