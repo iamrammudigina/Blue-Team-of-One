@@ -29,7 +29,7 @@ a{color:var(--sky-ink)}
 .masthead .mark{font-family:"Space Grotesk",sans-serif; font-weight:700; letter-spacing:-.02em; font-size:20px; white-space:nowrap}
 .masthead .mark b{color:var(--teal)}
 .masthead .tag{font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-3); display:none}
-.site-nav{display:flex; gap:22px; overflow-x:auto; scrollbar-width:none}
+.site-nav{display:flex; gap:15px; overflow-x:auto; scrollbar-width:none}
 .site-nav::-webkit-scrollbar{display:none}
 .site-nav a{font-family:"IBM Plex Mono",monospace; font-size:12.5px; letter-spacing:.02em; color:var(--ink-2); text-decoration:none; padding:2px 0; border-bottom:2px solid transparent; white-space:nowrap; transition:color .15s}
 .site-nav a:hover,.site-nav a[aria-current="page"]{color:var(--ink); border-color:var(--teal)}
@@ -409,3 +409,6 @@ noscript .sw-panel{display:block; border-bottom:1px solid var(--line); padding-b
 .li-center .tiles.appgrid .tile p{display:none}          /* hide the long tagline in compact mode */
 .li-center .tiles.appgrid .tile .t-meta{font-size:11px; margin-top:2px}
 @media(max-width:520px){ .li-center .tiles.appgrid{grid-template-columns:repeat(2,1fr)} }
+
+/* ---- 9th vertical tint: PowerShell Library (v24) ---- */
+.tile.t-emerald{background:linear-gradient(140deg,#E7F6EE,#FFFFFF 58%)}  .tile.t-emerald .t-ico{background:#D6F0E0; color:#047857}

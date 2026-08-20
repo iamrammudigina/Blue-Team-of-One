@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proving "no standing admin" to an auditor: an Intune privileged-access evidence generator — Blue Team of One</title>
+<meta name="description" content="A read-only PowerShell script that scans Entra role holders and correctly separates true standing admin from live PIM activations and eligible-only access — resolving group members, flagging GDAP partner grants, and writing a SHA-256'd, date-stamped HTML evidence file for access reviews.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=22">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/" aria-current="page">PS</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/powershell/">PowerShell Library</a><span class="sep">›</span><a href="/powershell/identity-access.html">Identity &amp; access</a></p>
+    <p class="eyebrow"><span class="dot"></span>PowerShell · access reviews</p>
+    <h1>Proving "no standing admin" to an auditor: <em>an Intune privileged-access evidence generator</em></h1>
+    <p class="lede">You moved every admin role onto PIM — now prove it. A screenshot of the roles blade doesn't distinguish a permanent Global Admin from someone mid-activation, and that difference is the entire point of your access-review control. This read-only script reads the schedule instances that <em>do</em> tell them apart, resolves group members, flags partner grants, and writes a hash-sealed evidence file.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 20, 2026</span>
+      <span>~9 min read · script</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>This is the tooling companion to <a href="/posts/tiered-pim-privileged-access.html">killing standing admin with PIM</a>. Standing up the tiered model is half the job; the other half is <em>demonstrating</em>, on demand and defensibly, that it's actually in effect — for an access review, a SOC 2 / ISO 27001 control, or your own peace of mind. The hard part is that the obvious evidence is misleading, so the script exists to produce evidence that isn't.</p>
+
+<h2 class="head"><span class="num">01</span>At a glance</h2>
+<p class="sub">What the script does, in one breath.</p>
+
+<p>It's a single read-only PowerShell script. Point it at a tenant and it:</p>
+
+<table class="cmp">
+  <tr><th>Step</th><th>What happens</th></tr>
+  <tr><td><strong>Scans the in-scope roles</strong></td><td>Intune Administrator and Global Administrator (editable) across every principal that holds them</td></tr>
+  <tr><td><strong>Separates the three states</strong></td><td>Standing (<span class="k">Assigned</span>) vs live PIM activation (<span class="k">Activated</span>) vs eligible-only — the distinction the portal blurs</td></tr>
+  <tr><td><strong>Resolves group members</strong></td><td>Roles assigned to role-assignable tier groups are expanded to the actual people</td></tr>
+  <tr><td><strong>Flags partner (GDAP) grants</strong></td><td>Cross-tenant partner access is detected, labelled, and noted as not-enumerable-here</td></tr>
+  <tr><td><strong>Writes hash-sealed evidence</strong></td><td>A date-stamped HTML report, colour-coded by state, with a SHA-256 over the data + tenant + timestamp + operator</td></tr>
+</table>
+
+<h2 class="head"><span class="num">02</span>Why a screenshot lies</h2>
+<p class="sub">The whole reason the script exists.</p>
+
+<p>Open the Entra roles blade and you see who "has" Global Administrator right now. What you <em>can't</em> see is <strong>why</strong> they have it at this instant. Two people can appear identical in that view while being opposites for audit purposes:</p>
+
+<div class="analogy">
+  <p class="tag">Same picture, opposite meaning</p>
+  <p>Person A holds Global Admin because it was <strong>permanently assigned</strong> years ago and never removed — a standing exception, exactly what your control says shouldn't exist. Person B holds Global Admin because they <strong>activated an eligible role via PIM</strong> ten minutes ago, time-bound, expiring this afternoon — proof the control is <em>working</em>. In a naïve export they're one and the same "active Global Administrator." Present that to an auditor and you've either flagged a healthy JIT activation as a finding, or worse, hidden a real standing assignment inside the noise.</p>
+</div>
+
+<h2 class="head"><span class="num">03</span>The key move — read the schedule instances</h2>
+<p class="sub">The <span class="k">assignmentType</span> field is what makes the distinction possible.</p>
+
+<p>The trick is <em>which</em> Graph endpoint you read. Most exports use the flat role-assignment list, which can't tell you activation state. The script reads the <strong>role-assignment schedule instances</strong>, which carry <span class="k">assignmentType</span> (<span class="k">Assigned</span> vs <span class="k">Activated</span>), <span class="k">memberType</span>, an end time, and — crucially — a link back to the eligible assignment a JIT activation came from:</p>
+
+<pre class="code"><span class="muted"># the three reads per in-scope role — this is the core</span>
+<span class="muted"># 1. ACTIVE, with activation state + expiry + linked-eligible proof</span>
+Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance -Filter "roleDefinitionId eq '$rid'" -ExpandProperty Principal -All
+<span class="muted"># 2. durable assignments — safety net for partner/GDAP grants</span>
+Get-MgRoleManagementDirectoryRoleAssignment -Filter "roleDefinitionId eq '$rid'" -ExpandProperty Principal -All
+<span class="muted"># 3. ELIGIBLE — the baseline "no standing" state</span>
+Get-MgRoleManagementDirectoryRoleEligibilityScheduleInstance -Filter "roleDefinitionId eq '$rid'" -ExpandProperty Principal -All</pre>
+
+<p>From there, each active principal is classified. A user with <span class="k">assignmentType=Activated</span> is a JIT activation (with its expiry and the eligible-assignment id recorded as proof). A user with <span class="k">Assigned</span> and no end is genuine standing — unless they're on the break-glass list, in which case it's standing <em>by design</em>. Groups are expanded to members; partner groups are labelled and left un-enumerated.</p>
+
+<pre class="code"><span class="muted"># the classification, distilled</span>
+if ($atype -eq 'Activated') {
+    <span class="muted"># live PIM activation — time-bound, linked to an eligible assignment → NOT standing</span>
+    'Active - PIM-activated (JIT)'
+} elseif ($BreakGlassUpns -contains $pi.Upn) {
+    'Active - BREAK-GLASS (by design)'   <span class="muted"># standing GA, but deliberate</span>
+} else {
+    'Active - STANDING/DIRECT'           <span class="muted"># the real exception — target zero</span>
+}</pre>
+
+<h2 class="head"><span class="num">04</span>Dedup, flags, and the integrity hash</h2>
+<p class="sub">The bits that make it evidence rather than a dump.</p>
+
+<p>A user can appear both eligible <em>and</em> currently activated, so the script deduplicates per (role, user), keeping the most privileged representation by rank (standing &gt; activated &gt; via-group &gt; eligible). It then raises <strong>flags</strong> — any standing/direct admin (target zero), break-glass accounts with a reminder to verify their control set, live activations as positive proof, and any partner group holding Intune Administrator.</p>
+
+<p>Finally it computes a <strong>SHA-256</strong> over a canonical serialization of the assignment data plus tenant id, timestamp, and the collecting operator, and stamps it into the report. That's what turns a point-in-time HTML file into tamper-evident evidence: change any row afterward and the hash no longer matches.</p>
+
+<pre class="code"><span class="muted"># canonical serialization → hash → sealed into the HTML footer</span>
+$canonical = ($records | Sort-Object Role, Name, State | ForEach-Object {
+    "$($_.Role)|$($_.Name)|$($_.Upn)|$($_.Tier)|$($_.State)|$($_.AssignmentType)|$($_.IsPartner)|$($_.IsStanding)"
+}) -join "`n"
+$canonical += "`n$TenantId`n$stamp`n$Collector"
+$sha = [System.BitConverter]::ToString(
+    [System.Security.Cryptography.SHA256]::Create().ComputeHash(
+        [System.Text.Encoding]::UTF8.GetBytes($canonical))).Replace('-','').ToLower()</pre>
+
+<h2 class="head"><span class="num">05</span>Running it</h2>
+<p class="sub">Read-only, needs directory/role-management read scopes.</p>
+
+<pre class="code"><span class="muted"># prerequisites</span>
+Install-Module Microsoft.Graph -Scope CurrentUser
+
+<span class="muted"># the script connects with read-only scopes:</span>
+<span class="muted">#   RoleManagement.Read.Directory, Directory.Read.All,</span>
+<span class="muted">#   GroupMember.Read.All, User.Read.All</span>
+
+<span class="muted"># run it (writes an HTML evidence file to the output dir)</span>
+.\Get-IntunePrivilegedAccess.ps1 -ExpectedTenantId '&lt;your-tenant-id&gt;'</pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Edit the CONFIG block before you run it — and don't assert controls you haven't built</h3>
+    <p>The published script is a <strong>sanitized template</strong>: the tenant id, tier group names, per-user justifications, break-glass account, partner relationships, and dispositions are all example values in a clearly-marked CONFIG block. Replace them with your own. One rule matters more than the rest: the break-glass justification lists a control set (CA-excluded, FIDO2, vaulted rotated password, sign-in alerting, GA-only). <strong>Trim it to only the controls actually in place</strong> — never claim a control you haven't implemented in something you'll hand an auditor.</p>
+  </div>
+</div>
+
+<div class="takeaway">
+  <p class="tag">The takeaway</p>
+  <p>The portal's roles view can't distinguish a standing Global Admin from someone mid-PIM-activation — and that distinction is the entire point of a no-standing-admin control. This script reads the role-assignment <em>schedule instances</em> to separate <span class="k">Assigned</span>, <span class="k">Activated</span>, and eligible; resolves tier-group members; flags partner GDAP paths; and seals it all into a date-stamped, SHA-256'd HTML report. It's read-only, it's a template you fill in, and it turns "trust me, we're on PIM" into evidence you can hand over.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading &amp; the script</h2>
+<ul>
+  <li><a href="/assets/scripts/Get-IntunePrivilegedAccess.ps1">Get-IntunePrivilegedAccess.ps1</a><span>the full sanitized script (right-click → save)</span></li>
+  <li><a href="/posts/tiered-pim-privileged-access.html">Killing standing admin: tiered privileged access with PIM</a><span>the model this script proves</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/graph/api/rbacapplication-list-roleassignmentscheduleinstances">roleAssignmentScheduleInstances — Microsoft Graph</a><span>the endpoint that carries assignmentType</span></li>
+</ul>
+</div>
+
+<p class="disclaimer" style="color:var(--ink-3);font-size:13px;margin-top:28px">The published script is a sanitized template; tenant, user, partner, and disposition values are examples to be replaced. Read-only, but review any script before running it against your tenant.</p>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/powershell/">PowerShell Library</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>
