@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hybrid Intune auto-enrollment, end to end — Blue Team of One</title>
+<meta name="description" content="The complete path a hybrid Azure AD-joined device takes to enrol itself into Intune automatically — every requirement in the chain, how the GPO trigger works, how to force it, how to verify, and why a stubborn few devices refuse to enrol.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=22">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/" aria-current="page">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/endpoint/">Endpoint Security</a><span class="sep">›</span><a href="/endpoint/hardening.html">Hardening &amp; compliance</a></p>
+    <p class="eyebrow"><span class="dot"></span>Endpoint · enrollment</p>
+    <h1>Hybrid Intune auto-enrollment, <em>end to end</em></h1>
+    <p class="lede">An unenrolled device is an unmanaged one — no compliance policy, no Defender onboarding, no device-based Conditional Access. Here's the complete path a hybrid Azure AD-joined machine takes to enrol itself into Intune automatically: every requirement in the chain, how the trigger fires, how to force it, how to verify, and why a stubborn few devices refuse.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 14, 2026</span>
+      <span>~9 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>Automatic enrollment is one of those things that works beautifully for 95% of your fleet and then leaves a handful of machines stubbornly unmanaged — and the failure is almost always silent. There's no error; the device just never enrols. The reason it's frustrating is that enrollment isn't one setting, it's a <strong>chain of prerequisites</strong>, and if any single link is missing the whole thing quietly does nothing.</p>
+
+<p>This walks the entire chain in order, for <strong>hybrid Azure AD-joined</strong> devices (domain-joined on-prem, synced to Entra). Get every link right and enrollment is genuinely hands-off: the user logs in, and the device manages itself.</p>
+
+<div class="analogy">
+  <p class="tag">Why enrollment is a security concern, not just admin</p>
+  <p>Every device-based control you rely on sits <em>downstream</em> of enrollment: compliance policies, Defender for Endpoint onboarding, and Conditional Access rules that require a compliant device. A machine that never enrolled isn't just unmanaged — it's an <strong>invisible gap</strong> in every one of those controls. Onboarding <em>is</em> hardening.</p>
+</div>
+
+<h2 class="head"><span class="num">01</span>The requirements chain</h2>
+<p class="sub">Four links. Miss one and enrollment silently doesn't happen.</p>
+
+<p>For a hybrid-joined device to auto-enrol, all four of these must be true at the same time. This is the whole game — most "it won't enrol" cases are one of these links missing:</p>
+
+<table class="cmp">
+  <tr><th>#</th><th>Requirement</th><th>Where it lives</th></tr>
+  <tr><td>1</td><td>Device is <strong>hybrid Azure AD joined</strong> (synced on-prem → Entra)</td><td>Entra Connect / device registration</td></tr>
+  <tr><td>2</td><td>Device object is in the <strong>enrollment OU</strong> (where the MDM-enrollment GPO is linked)</td><td>Active Directory</td></tr>
+  <tr><td>3</td><td>The <strong>device account</strong> is in the enrollment security group</td><td>AD security group</td></tr>
+  <tr><td>4</td><td>The <strong>user account</strong> is in the enrollment security group too</td><td>AD security group</td></tr>
+</table>
+
+<p>The one people miss most often is the split between <strong>#3 and #4</strong>. The <em>device</em> and the <em>user</em> both have to be members of the enrollment group — it's easy to add one and forget the other, and if either is missing, enrollment won't trigger for that user on that machine. (There's usually a parallel group for cloud-only Azure AD-joined devices; this post is the hybrid path, but the same device+user logic applies.)</p>
+
+<h2 class="head"><span class="num">02</span>How the automatic trigger actually works</h2>
+<p class="sub">The GPO plants a scheduled task; logon fires it.</p>
+
+<p>Once the device is in the right OU, the MDM-enrollment GPO linked there applies to it. That GPO does one key thing: it registers a <strong>scheduled task</strong> for automatic MDM enrollment. From then on the sequence is:</p>
+
+<pre class="code"><span class="muted"># the automatic chain, once OU + group membership are correct</span>
+1. Device sits in the enrollment OU
+   → the Hybrid Azure AD Intune-enrollment GPO applies
+2. GPO registers the MDM auto-enrollment scheduled task
+3. At next reboot / user logon (on the corporate network),
+   the task fires and enrollment is triggered automatically
+4. Device appears in Intune, compliance + config policies flow down</pre>
+
+<p>The <strong>corporate-network</strong> part in step 3 matters: the device has to be able to reach a domain controller to apply the GPO and complete the on-prem side of the handshake. A machine that's only ever been off-VPN at a user's home can sit in the right OU and group and <em>still</em> never enrol, simply because the GPO never applied. That's one of the quiet failure modes.</p>
+
+<h2 class="head"><span class="num">03</span>Force it without waiting</h2>
+<p class="sub">You don't have to wait for the scheduled task to fire on its own.</p>
+
+<p>When you've just fixed the OU or group membership and want to trigger enrollment immediately rather than wait for the next logon cycle, on the device:</p>
+
+<pre class="code"><span class="muted"># 1. pull the latest policy (this applies the enrollment GPO + task)</span>
+gpupdate /force
+
+<span class="muted"># 2. check the device's join state and enrollment status</span>
+dsregcmd /status</pre>
+
+<p>A reboot or sign-out/sign-in after <span class="k">gpupdate /force</span> is often what actually kicks the scheduled task. If you want to be explicit, you can also run the MDM-enrollment scheduled task directly from Task Scheduler (under <span class="k">Microsoft &gt; Windows &gt; EnterpriseMgmt</span>) rather than waiting for logon.</p>
+
+<h2 class="head"><span class="num">04</span>Verify — reading <span class="k">dsregcmd /status</span></h2>
+<p class="sub">This one command tells you where in the chain a device is stuck.</p>
+
+<p><span class="k">dsregcmd /status</span> is the single most useful diagnostic. The fields that matter for hybrid enrollment:</p>
+
+<table class="cmp">
+  <tr><th>Field</th><th>What you want</th><th>If it's wrong</th></tr>
+  <tr><td><span class="k">AzureAdJoined</span></td><td><span class="k">YES</span></td><td>Device isn't hybrid-joined yet — requirement #1 fails; nothing else matters until this is YES</td></tr>
+  <tr><td><span class="k">DomainJoined</span></td><td><span class="k">YES</span></td><td>Not on the domain — the on-prem half is missing</td></tr>
+  <tr><td><span class="k">MdmUrl</span> / <span class="k">MDMEnrollmentUrl</span></td><td>populated</td><td>Blank = the enrollment task never ran or never got the config</td></tr>
+  <tr><td><span class="k">DeviceAuthStatus</span></td><td><span class="k">SUCCESS</span></td><td>Device can't authenticate to Entra — sync/registration issue</td></tr>
+</table>
+
+<p>Read top to bottom: if <span class="k">AzureAdJoined</span> isn't <span class="k">YES</span>, fix that first — the device isn't even a candidate for enrollment. If it's <span class="k">YES</span> but <span class="k">MdmUrl</span> is blank, the join is fine and the <em>enrollment</em> step is what's failing — which points you back at the OU/GPO/group chain.</p>
+
+<h2 class="head"><span class="num">05</span>Why the stubborn few fail</h2>
+<p class="sub">When most of the fleet enrolled but a handful won't, it's almost always one of these.</p>
+
+<p>You've confirmed the OU and both group memberships, re-added them, and a few machines <em>still</em> won't enrol. At that point, work this list — these are the silent failure modes that survive a naïve "remove and re-add":</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>The usual culprits, in order of likelihood</h3>
+    <p><strong>1. Group membership hasn't taken effect yet.</strong> AD group changes only apply after a new Kerberos ticket — which for a <em>computer</em> account means a <strong>reboot</strong>, and for a <em>user</em> a full sign-out/sign-in. Re-adding to the group and testing immediately, without rebooting, looks like failure but isn't. This is the number-one false alarm.</p>
+    <p><strong>2. The device never reached a DC.</strong> If it hasn't been on the corporate network / VPN since the change, the GPO never applied and the task was never registered. Get it on-network, then <span class="k">gpupdate /force</span> + reboot.</p>
+    <p><strong>3. Stale device object / duplicate in Entra.</strong> A device that was previously registered can have a stale or duplicate object; the new enrollment collides with it. Check the device in Entra and remove stale duplicates.</p>
+    <p><strong>4. Both accounts aren't in the group.</strong> Re-verify that <em>both</em> the computer object and the signed-in user are members — not just one. A device in the group used by a user who isn't (or vice-versa) won't enrol.</p>
+    <p><strong>5. GPO scope / security filtering.</strong> Confirm the enrollment GPO is actually linked to the OU the device sits in and isn't filtered out for that object.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">06</span>Confirm success in Intune</h2>
+<p class="sub">The device shows up, managed and compliant.</p>
+
+<p>When it works, the device appears under <strong>Devices → All devices</strong> in Intune, showing <span class="k">Managed by: Intune</span>, the correct ownership (Corporate / Personal), a compliance state, OS build, the primary user's UPN, and a recent check-in time. That check-in timestamp is your proof the device is not just enrolled but actively talking to Intune and pulling policy. Once it's there, every downstream control — compliance, Defender, device-based Conditional Access — has a managed device to act on.</p>
+
+<div class="takeaway">
+  <p class="tag">The end-to-end chain</p>
+  <p>Hybrid-join the device → put it in the enrollment OU → add <em>both</em> the computer and the user to the enrollment group → get it on the corporate network so the GPO applies → <span class="k">gpupdate /force</span> and reboot to fire the task → verify with <span class="k">dsregcmd /status</span> → confirm it lands in Intune. When a few stubbornly refuse, it's nearly always an un-rebooted group change or a device that never reached a DC — not the config you keep re-doing.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/mem/intune/enrollment/windows-enroll">Set up automatic enrollment for Windows — Microsoft Learn</a><span>the hybrid + cloud enrollment paths</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/devices/troubleshoot-hybrid-join-windows-current">Troubleshoot hybrid Azure AD join</a><span>reading dsregcmd and fixing join state</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/mem/intune/enrollment/quickstart-setup-auto-enrollment">Configure Intune auto-enrollment via GPO</a><span>the enrollment scheduled task</span></li>
+</ul>
+</div>
+
+<p class="disclaimer" style="color:var(--ink-3);font-size:13px;margin-top:28px">Anonymized from real support work; domain, group, device, and account names have been changed.</p>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/endpoint/">Endpoint</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>

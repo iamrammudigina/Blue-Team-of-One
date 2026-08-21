@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The iPhone she never owned: an account takeover, read backwards — Blue Team of One</title>
+<meta name="description" content="A business email compromise where the clearest evidence wasn't the sign-in or the inbox rule — it was an MFA device the user swore she never enrolled. How attacker-registered auth methods fingerprint a token-theft takeover, and the containment order that matters.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=22">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/" aria-current="page">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/ir/">IR</a><span class="sep">›</span><a href="/ir/bec.html">Business email compromise</a></p>
+    <p class="eyebrow"><span class="dot"></span>Incident response · account takeover</p>
+    <h1>The iPhone <em>she never owned</em></h1>
+    <p class="lede">A business email compromise, read backwards. The clearest evidence wasn't the foreign sign-in or the hidden inbox rule — it was an MFA device the user swore she'd never enrolled. Attacker-registered auth methods are the fingerprint of a token-theft takeover, and the order you contain them in matters.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 13, 2026</span>
+      <span>~9 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>The alert chain looked like every business email compromise: an unfamiliar sign-in, then within the hour a flurry of Defender alerts — suspicious inbox rule, mass mail, sending-limit exceeded, phishing sent by the user. By the time it fired, the attacker had already blasted well over a thousand phishing emails from the mailbox under a tax-document lure.</p>
+
+<p>But the detail that made the whole timeline click — and that tells you this was <strong>token theft, not a guessed password</strong> — was an MFA device. When we called the user, she said something you learn to listen for: <em>"I've only ever used a Samsung. I've never owned an iPhone."</em> An "iPhone" had been registered to her account as a strong-auth method weeks earlier. That single line reframed the entire incident.</p>
+
+<h2 class="head"><span class="num">01</span>The timeline, and what each step really means</h2>
+<p class="sub">Read in order, the sequence is a textbook adversary-in-the-middle takeover.</p>
+
+<pre class="code"><span class="muted"># reconstructed from Entra sign-in logs + Defender alerts</span>
+11:14  interrupted sign-in, then repeated SUCCESSFUL sign-ins    <span class="muted"># same bad-rep IP</span>
+       from one IP, hitting OfficeHome / Exchange Online
+12:50  attacker DELETES the user's Authenticator profile         <span class="muted"># kicks off the real device</span>
+12:50  attacker re-adds a device to strong-auth                  <span class="muted"># persistence on their terms</span>
+12:53  hidden inbox rule created: move senders → "! Outside Info"  <span class="muted"># hide the replies</span>
+13:39  ~1,200+ phishing emails sent under a tax-doc subject      <span class="muted"># the payday</span></pre>
+
+<p>The repeated <em>successful</em> sign-ins with no failed-password storm is the tell: the attacker wasn't guessing credentials, they were <strong>replaying a stolen session</strong> — the hallmark of an adversary-in-the-middle phishing kit that captures the token after the user legitimately completes MFA. From there, everything they did was about <em>keeping</em> access and <em>hiding</em> activity.</p>
+
+<h2 class="head"><span class="num">02</span>Why the MFA tampering is the fingerprint</h2>
+<p class="sub">An attacker who owns the session immediately makes the session theirs.</p>
+
+<p>Once inside, the attacker did three things to the user's authentication methods, and each one is a classic post-takeover move:</p>
+
+<table class="cmp">
+  <tr><th>Attacker action</th><th>What it's for</th><th>Why it's evidence</th></tr>
+  <tr><td>Deleted the Authenticator profile</td><td>Disrupt the real owner's push approvals</td><td>User suddenly can't approve logins</td></tr>
+  <tr><td>Registered a new device ("iPhone")</td><td>Persistent MFA the attacker controls</td><td>User doesn't recognize the device</td></tr>
+  <tr><td>Re-added the user's own device later</td><td>Reduce suspicion / restore normal look</td><td>Churn in method history around the sign-in</td></tr>
+</table>
+
+<div class="analogy">
+  <p class="tag">The question that cracks these fast</p>
+  <p>Every registered authentication method has an owner who can confirm or deny it. "Do you recognize this device / phone number as one you added?" is the cheapest, highest-signal question in an ATO investigation. A <strong>device the user disowns</strong> is near-proof of takeover — far more decisive than a foreign IP, which travel or VPNs can explain away. Pull the method-registration audit early and read it against what the user actually owns.</p>
+</div>
+
+<h2 class="head"><span class="num">03</span>Containment — in the right order</h2>
+<p class="sub">Do these in sequence. Get the order wrong and you leave a door open.</p>
+
+<p>The instinct is to reset the password first. That's not enough on its own and, done alone, can even tip the attacker off while leaving their access intact. The token and the attacker's MFA method are what actually hold the door open, so the sequence matters:</p>
+
+<pre class="code"><span class="muted"># 1. kill the live access FIRST — revoke tokens, not just the password</span>
+Revoke-AzureADUserAllRefreshToken -ObjectId &lt;user-object-id&gt;
+<span class="muted">#   (or the Graph/Entra equivalent) — invalidates the stolen session</span>
+
+<span class="muted"># 2. reset the password (forces re-auth on the now-dead session)</span>
+
+<span class="muted"># 3. REMOVE the attacker's MFA method, restore the user's own</span>
+<span class="muted">#    a password reset alone does NOT remove a rogue registered device</span>
+
+<span class="muted"># 4. rip out persistence in the mailbox</span>
+Get-InboxRule -Mailbox user@contoso.com | Format-Table Name, Description, Enabled
+Remove-InboxRule -Mailbox user@contoso.com -Identity "! Outside Info Emails"
+Get-Mailbox user@contoso.com | Format-List ForwardingSMTPAddress, DeliverToMailboxAndForward
+
+<span class="muted"># 5. scope the blast — who received the phishing, purge it, notify</span>
+<span class="muted"># 6. full endpoint health check on the user's real device</span></pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>A password reset does not evict a token thief</h3>
+    <p>The stolen session token and the attacker's registered MFA device survive a password change. You must <strong>revoke sessions</strong> and <strong>remove the rogue auth method</strong> explicitly. Skip either and the attacker can still be inside after the "fix" — reset-only is the single most common incomplete containment in ATO response.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">04</span>The hidden inbox rule</h2>
+<p class="sub">Small, quiet, and the reason the user never noticed.</p>
+
+<p>The rule the attacker created — moving mail from specific senders into an innocuously named folder like <span class="k">! Outside Info Emails</span> — is the classic BEC concealment move. When the phishing blast goes out and recipients reply "is this really you?", the rule sweeps those replies out of the inbox so the real owner never sees the alarm. Any inbox rule that <em>hides or diverts</em> incoming mail, created around the time of a suspicious sign-in, should be treated as attacker persistence until proven otherwise — and you check for forwarding at the same time, since that's the other quiet exfiltration path.</p>
+
+<div class="takeaway">
+  <p class="tag">The lesson</p>
+  <p>In an account takeover, read the <em>authentication methods</em>, not just the sign-in logs. A device the user disowns is the fingerprint that turns "suspicious login" into "confirmed compromise." And contain in the right order — <strong>revoke sessions, reset password, remove rogue MFA, then clear inbox rules</strong> — because the token and the attacker's device, not the password, are what actually hold the door open.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/security/operations/incident-response-playbook-compromised-emails">Compromised email account playbook — Microsoft</a><span>the canonical ATO response steps</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/authentication/howto-mfa-userdevicesettings">Manage a user's authentication methods — Microsoft Learn</a><span>reviewing and removing registered methods</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/defender-office-365/responding-to-a-compromised-email-account">Respond to a compromised account — Microsoft Defender</a><span>token revocation and rule cleanup</span></li>
+</ul>
+</div>
+
+<p class="disclaimer" style="color:var(--ink-3);font-size:13px;margin-top:28px">This write-up is anonymized from a real incident; names, addresses, and numbers have been changed.</p>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/ir/">IR</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>

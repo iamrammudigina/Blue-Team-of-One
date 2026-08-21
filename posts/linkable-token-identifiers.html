@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linkable Token Identifiers: following an attacker across every M365 service — Blue Team of One</title>
+<meta name="description" content="Session ID and Unique Token Identifier turn scattered audit logs into one traceable thread. How to use linkable token identifiers to track suspicious sign-ins, trace token misuse, enumerate sessions, and correlate activity across Exchange, SharePoint, Teams and Graph — plus the hunting queries and the auto-revoke playbook.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=22">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/" aria-current="page">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/detection/">Detection Engineering</a><span class="sep">›</span><a href="/detection/kql-hunting.html">Advanced hunting (KQL)</a></p>
+    <p class="eyebrow"><span class="dot"></span>Advanced hunting · identity forensics</p>
+    <h1>Linkable Token Identifiers: <em>following an attacker across every M365 service</em></h1>
+    <p class="lede">A stolen token used to read email, download files from SharePoint, and change a Teams setting used to look like three unrelated log entries. Session ID and Unique Token Identifier stitch them into one thread — so you can reconstruct exactly what happened in a single sign-in session, across every workload. Here's how to investigate with them, hunt with them, and automate response.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 14, 2026</span>
+      <span>~18 min read · playbook</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>For years, correlating a user's actions across Microsoft 365 meant stitching together IP addresses, user agents, and timestamps — and hoping. That approach breaks exactly when it matters most: attackers share IPs via VPNs or compromised devices, and a stolen token's activity blends into the victim's own. You could see <em>that</em> a token was used, but not tie together everything done with it across services. <strong>Linkable token identifiers</strong> fix that.</p>
+
+<h2 class="head"><span class="num">01</span>What the identifiers are</h2>
+<p class="sub">Two tracking tags baked into sign-ins and tokens.</p>
+
+<p>Think of these as tracking tags stamped inside sign-ins and tokens that follow the request across Outlook, Teams, SharePoint, and Graph. Two matter:</p>
+
+<table class="cmp">
+  <tr><th>Identifier</th><th>What it tracks</th><th>Use it to…</th></tr>
+  <tr><td><strong>Session ID (SID)</strong></td><td>All actions from a single sign-in session (interactive or non-interactive)</td><td>Group everything that happened in one login</td></tr>
+  <tr><td><strong>Unique Token Identifier (UTI)</strong></td><td>Actions performed by one specific token</td><td>Pinpoint misuse of a particular stolen token</td></tr>
+</table>
+
+<div class="analogy">
+  <p class="tag">Before, and after</p>
+  <p><strong>Before:</strong> analysts leaned on IP + user agent + timestamp to correlate — signals that lie when an attacker shares the victim's IP, and that can't cleanly tie one token's actions together across services. <strong>After:</strong> the SID groups an entire session's activity; the UTI gives per-token traceability showing exactly which actions a given token performed across M365. That's end-to-end investigation — from the moment of sign-in to every downstream action in Exchange, Teams, SharePoint, or Graph.</p>
+</div>
+
+<h2 class="head"><span class="num">02</span>Where to find them</h2>
+<p class="sub">The identifiers surface across the logs you already query.</p>
+
+<p>Linkable token identifiers now appear in Entra sign-in logs and the major workload audit logs, which is what makes cross-service correlation possible:</p>
+
+<pre class="code"><span class="muted"># the identifiers are available in:</span>
+- Microsoft Entra sign-in logs        (SigninLogs → SessionId, UniqueTokenIdentifier)
+- Microsoft Exchange Online audit     (OfficeActivity → AppAccessContext.AADSessionId)
+- Microsoft SharePoint Online audit   (OfficeActivity)
+- Microsoft Teams audit               (OfficeActivity)
+- Microsoft Graph activity logs</pre>
+
+<p>The join key that bridges them: the <span class="k">SessionId</span> from <span class="k">SigninLogs</span> equals the <span class="k">AADSessionId</span> nested inside <span class="k">AppAccessContext</span> in <span class="k">OfficeActivity</span>. Parse it out and the two worlds connect.</p>
+
+<h2 class="head"><span class="num">03</span>The core join — one session, every workload</h2>
+<p class="sub">Start with a session, see everything it touched.</p>
+
+<p>This is the query that everything else builds on. Take a <span class="k">SessionId</span> from a suspicious sign-in and pull every action performed in that session across all workloads:</p>
+
+<pre class="code"><span class="muted">// every action in one sign-in session, across all M365 workloads</span>
+let session = "&lt;session-guid&gt;";   <span class="muted">// from the sign-in log</span>
+OfficeActivity
+| extend AppAccessContextParsed = parse_json(AppAccessContext)
+| extend AADSessionId = tostring(AppAccessContextParsed.AADSessionId)
+| where AADSessionId == session
+| project TimeGenerated, Operation, UserId, ClientIP, OfficeObjectId, AADSessionId
+| order by TimeGenerated desc</pre>
+
+<span class="steplab ver">How to read it</span>
+<p class="fc-ex" style="color:var(--ink-2)">Every row is an action tied to that one session — a <span class="k">FileAccessed</span> in SharePoint, a run of <span class="k">MailItemsAccessed</span> in Exchange, a <span class="k">New-TransportRule</span> or <span class="k">Set-Mailbox</span>. Seeing them together reconstructs the session's story: what was read, what was exfiltrated, what was changed. The <span class="k">OfficeObjectId</span> often shows the exact file or object touched.</p>
+
+<h2 class="head"><span class="num">04</span>Investigation workflows</h2>
+<p class="sub">Four ways to turn the identifiers into answers. Pick one.</p>
+
+<div class="switch">
+  <div class="sw-group">
+    <p class="sw-glabel">Linkable-ID investigation patterns</p>
+    <div class="sw-pills">
+      <button class="sw-pill active" data-target="w1"><span class="n">A</span> Track suspicious sign-ins</button>
+      <button class="sw-pill" data-target="w2"><span class="n">B</span> Trace token misuse (UTI)</button>
+      <button class="sw-pill" data-target="w3"><span class="n">C</span> Enumerate active sessions</button>
+      <button class="sw-pill" data-target="w4"><span class="n">D</span> Activity by workload</button>
+    </div>
+  </div>
+  <div class="sw-panels">
+
+    <div class="sw-panel active" id="w1">
+      <h3>A · Track suspicious sign-ins</h3>
+      <p class="sit">Credentials were phished — what did the session touch?</p>
+<pre class="code"><span class="muted">// 1. get the SessionId from the suspicious sign-in</span>
+SigninLogs
+| where UserPrincipalName == "victim@contoso.com"
+| where TimeGenerated between (datetime(2026-01-01) .. datetime(2026-01-03))
+| project TimeGenerated, UserPrincipalName, IPAddress, AppDisplayName, SessionId
+
+<span class="muted">// 2. feed that SessionId into the core join (Section 03) to see
+//    every Exchange / Teams / SharePoint action in that session</span></pre>
+      <p class="fc-ex" style="color:var(--ink-2)">Take the <span class="k">SessionId</span>, run the Section 03 join, and reconstruct what the attacker did — read emails, downloaded files, changed settings — all under one session.</p>
+    </div>
+
+    <div class="sw-panel" id="w2">
+      <h3>B · Trace token misuse with the UTI</h3>
+      <p class="sit">A specific stolen token was used against M365 — trace every action.</p>
+<pre class="code"><span class="muted">// the UniqueTokenIdentifier gives per-token granularity</span>
+SigninLogs
+| where UserPrincipalName == "victim@contoso.com"
+| where TimeGenerated &gt; ago(7d)
+| project TimeGenerated, IPAddress, AppDisplayName, SessionId, UniqueTokenIdentifier
+| sort by TimeGenerated asc</pre>
+      <p class="fc-ex" style="color:var(--ink-2)">Where the SID groups a whole session, the <span class="k">UniqueTokenIdentifier</span> isolates the actions of one <em>token</em> — so you can see exactly which files were touched or which Teams channels were changed with that specific token, separating the attacker's token from the user's legitimate ones in the same window.</p>
+    </div>
+
+    <div class="sw-panel" id="w3">
+      <h3>C · Enumerate active sessions</h3>
+      <p class="sit">How many sessions does this compromised user have — so you can cut them.</p>
+<pre class="code"><span class="muted">// list every session for a user, with its IPs, apps and span</span>
+SigninLogs
+| where UserPrincipalName == "victim@contoso.com"
+| where TimeGenerated &gt; ago(7d)
+| summarize StartTime = min(TimeGenerated), EndTime = max(TimeGenerated),
+            Apps = make_set(AppDisplayName), IPs = make_set(IPAddress)
+        by SessionId
+| order by StartTime desc</pre>
+      <p class="fc-ex" style="color:var(--ink-2)">One row per session, showing the IPs, the apps used, and the time span. Sessions from an unexpected IP or with an unusual app mix are your revoke targets — enumerate first, then revoke to cut off unauthorized access cleanly.</p>
+    </div>
+
+    <div class="sw-panel" id="w4">
+      <h3>D · Activity breakdown by workload</h3>
+      <p class="sit">Where did a session spend its time — Exchange, SharePoint, Teams?</p>
+<pre class="code"><span class="muted">// count a session's actions per workload — shape of the activity</span>
+let session = "&lt;session-guid&gt;";
+OfficeActivity
+| extend AppAccessContextParsed = parse_json(AppAccessContext)
+| extend AADSessionId = tostring(AppAccessContextParsed.AADSessionId)
+| where AADSessionId == session
+| summarize ActivityCount = count() by OfficeWorkload
+| order by ActivityCount desc</pre>
+      <p class="fc-ex" style="color:var(--ink-2)">A quick profile of the session: heavy <span class="k">Exchange</span> counts suggest mailbox access/exfil; a spike in <span class="k">SharePoint</span>/<span class="k">OneDrive</span> suggests file harvesting. It tells you where to dig first before pulling the detailed per-action list.</p>
+    </div>
+
+  </div>
+</div>
+
+<h2 class="head"><span class="num">05</span>Hunting with session context</h2>
+<p class="sub">Bake the identifiers into detections, not just investigations.</p>
+
+<p>The real power is enriching <em>hunts</em> with session and token context, so a hit comes with the thread already attached. Three that pay off, each tuned to cut noise:</p>
+
+<h3 style="font-family:'Space Grotesk';font-size:17px;margin:22px 0 6px">Risky users, with the session that made them risky</h3>
+<pre class="code">AADRiskyUsers
+| where IsDeleted == false
+| where RiskState == "atRisk" and RiskLevel in ("high", "medium")   <span class="muted">// real, active risk</span>
+| where UserPrincipalName !contains "svc" and UserPrincipalName !contains "noreply"  <span class="muted">// drop service accts</span>
+| join kind=inner (
+    SigninLogs
+    | summarize arg_max(TimeGenerated, *) by UserPrincipalName
+    | project SigninTime = TimeGenerated, SessionId, UniqueTokenIdentifier,
+              UserPrincipalName, AppDisplayName, IPAddress, DeviceDetail
+  ) on UserPrincipalName
+| project SigninTime, UserPrincipalName, RiskLevel, RiskState,
+          SessionId, UniqueTokenIdentifier, AppDisplayName, IPAddress</pre>
+<p class="fc-ex" style="color:var(--ink-2)">Ties each at-risk user directly to their most recent sign-in session — so the alert arrives with the <span class="k">SessionId</span> already attached, ready to feed into the Section 03 join. Excluding <span class="k">svc</span>/<span class="k">noreply</span> and informational/stale risk keeps it to genuine cases.</p>
+
+<h3 style="font-family:'Space Grotesk';font-size:17px;margin:22px 0 6px">Mailbox forwarding to an external address</h3>
+<pre class="code">let ForwardingIndicators = dynamic(["ForwardingSmtpAddress", "ForwardingAddress"]);
+OfficeActivity
+| where Operation == "Set-Mailbox"
+| extend ParametersDynamic = todynamic(Parameters)
+| mv-expand Parameter = ParametersDynamic
+| extend ParamName = tostring(Parameter.Name), ParamValue = tostring(Parameter.Value)
+| where ParamName in (ForwardingIndicators)
+| where isnotempty(ParamValue)
+| extend ForwardedEmail = tolower(trim_start("smtp:", ParamValue))
+| where not(ForwardedEmail endswith "@contoso.com")   <span class="muted">// exclude internal forwarding</span>
+| extend PerformedBy = UserId
+| where PerformedBy !contains "admin" and PerformedBy !contains "svc"   <span class="muted">// exclude admins/service accts</span>
+| project TimeGenerated, PerformedBy, ForwardedEmail, ParamName, ParamValue</pre>
+<p class="fc-ex" style="color:var(--ink-2)">Auto-forwarding to an <em>external</em> domain is a classic BEC exfiltration move. Excluding your own domain and pre-approved partners, plus admin/service accounts, strips the benign changes and leaves the ones worth chasing — then join to <span class="k">SigninLogs</span> on the session to see who set it and from where.</p>
+
+<h3 style="font-family:'Space Grotesk';font-size:17px;margin:22px 0 6px">Suspicious inbox-rule creation</h3>
+<pre class="code">let timeframe = 90d;
+let Keywords = dynamic(["helpdesk","suspicious","fake","malicious","phishing",
+                        "spam","do not click","do not open","hijacked","fatal"]);
+CloudAppEvents
+| where TimeGenerated &gt;= ago(timeframe)
+| where ActivityObjects has_any (Keywords) and ObjectName contains "UpdateInboxRules"
+| project TimeGenerated, IPAddress, ActivityType, ObjectName,
+          AccountDisplayName, Application, ActionType</pre>
+<p class="fc-ex" style="color:var(--ink-2)">Attacker inbox rules that hide replies love these keywords (a rule that files anything containing "helpdesk" or "phishing" into a folder the victim won't see). Correlate hits with the risky-users query above to prioritise rules created by accounts already flagged at-risk.</p>
+
+<h2 class="head"><span class="num">06</span>Automating the response</h2>
+<p class="sub">Feed the session ID into a playbook that revokes on risky sign-in.</p>
+
+<p>Because the risky-user hunt now emits a <span class="k">SessionId</span>, you can hand it to a Sentinel <strong>playbook</strong> (Logic App) that revokes active sessions on a risky sign-in, cutting off token reuse automatically. The core flow:</p>
+
+<pre class="code"><span class="muted"># Sentinel playbook — auto-revoke on risky sign-in</span>
+Microsoft Sentinel incident (trigger)
+  → Get incident
+  → Entities - Get Accounts
+  → For each account:
+       Run query (pull the risky session's cross-workload activity)
+       Revoke sign-in sessions   (invalidate tokens)
+       Add comment to incident   (what was found + actioned)</pre>
+
+<p>Start with the core revoke and expand from there. Sensible next enhancements: pull the session's cross-workload activity logs (email access, downloads, Teams changes) into the incident; check Conditional Access enforcement outcomes (MFA / password-reset challenges) and their completion status; force password reset or disable the account in high-severity cases; and enrich the incident with a summary of user actions and responses taken. A phased approach keeps the playbook reliable while it grows toward full automated triage.</p>
+
+<div class="takeaway">
+  <p class="tag">The takeaway</p>
+  <p>Linkable token identifiers turn scattered logs into one traceable thread: the <strong>SID</strong> groups a whole sign-in session, the <strong>UTI</strong> isolates a single token's actions, and the <span class="k">SessionId</span>↔<span class="k">AADSessionId</span> join connects Entra sign-ins to every M365 workload. Use them to reconstruct a compromise end-to-end, enumerate sessions to revoke, and — once your hunts emit the session ID — hand it straight to a playbook that revokes automatically. This is what closes the gap between "a token was stolen" and "here's everything it did, and it's already cut off."</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/monitoring-health/concept-sign-in-log-activity-details">Sign-in log activity details — Microsoft Learn</a><span>SessionId and token identifiers</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/purview/audit-log-activities">Audit log activities (OfficeActivity)</a><span>AppAccessContext and workload operations</span></li>
+  <li><a href="/posts/kql-phishing-investigation.html">Investigating a phishing report with KQL</a><span>the email side of the same investigation</span></li>
+  <li><a href="/posts/aitm-account-takeover.html">The iPhone she never owned</a><span>the account-takeover response these feed</span></li>
+</ul>
+</div>
+
+<p class="disclaimer" style="color:var(--ink-3);font-size:13px;margin-top:28px">Anonymized from real investigation work; accounts, session identifiers, IPs, and domains have been replaced with generic examples.</p>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/detection/">Detection</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+<script>
+(function(){
+  var pills=document.querySelectorAll('.sw-pill');
+  var panels=document.querySelectorAll('.sw-panel');
+  function show(id){
+    for(var i=0;i<panels.length;i++){ panels[i].classList.toggle('active', panels[i].id===id); }
+    for(var j=0;j<pills.length;j++){ pills[j].classList.toggle('active', pills[j].getAttribute('data-target')===id); }
+  }
+  for(var k=0;k<pills.length;k++){
+    pills[k].addEventListener('click', function(){ show(this.getAttribute('data-target')); });
+  }
+})();
+</script>
+
+</body>
+</html>

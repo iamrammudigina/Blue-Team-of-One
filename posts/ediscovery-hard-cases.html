@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Legal requests: the hard cases (an interactive runbook) — Blue Team of One</title>
+<meta name="description" content="Twelve real eDiscovery/legal-hold scenarios in one interactive runbook — place, release, and search across active, inactive, soft-deleted and purged mailboxes, plus the orphaned-hold trap. Pick your scenario.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=22">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/" aria-current="page">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/forensics/">Digital Forensics</a><span class="sep">›</span><a href="/forensics/ediscovery-hard-cases.html">eDiscovery hard cases</a></p>
+    <p class="eyebrow"><span class="dot"></span>Interactive runbook · eDiscovery</p>
+    <h1>Legal requests: <em>the hard cases</em></h1>
+    <p class="lede">Twelve real legal-hold and eDiscovery scenarios in one runbook — placing, releasing, and searching across active, inactive, soft-deleted, and purged mailboxes, plus the orphaned-hold trap. Pick the scenario that matches yours; every command is copy-ready.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 12, 2026</span>
+      <span>~20 min read · interactive</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>Most legal-hold write-ups stop at "run this command." Real requests don't cooperate: the custodian left the company, the mailbox is soft-deleted, the client says "litigation hold" but means a Purview case hold, or you're asked to release one matter and discover the mailbox is held by three. Get any of these wrong and the failure mode isn't a stack trace — it's <strong>permanent, unrecoverable data loss</strong> (spoliation), with legal consequences for the client and the provider.</p>
+
+<p>This is the runbook I wish I'd had. Below is a scenario switcher: pick what you're actually facing and jump straight to its investigation, commands, verification, and cautions. First, three things that underpin all of it.</p>
+
+<div class="analogy">
+  <p class="tag">The terminology trap</p>
+  <p>When a client says <strong>"litigation hold,"</strong> they usually mean "preserve this data" — not the specific <em>Exchange mailbox Litigation Hold flag</em>. Nine times out of ten the right mechanism is a <strong>Purview eDiscovery case hold</strong>, which is scoped to a named matter and auditable. Clarifying which one they need — and defaulting to the case hold — is half the job. The two are different mechanisms with different release procedures.</p>
+</div>
+
+<h2 class="head"><span class="num">00</span>Golden rules</h2>
+<p class="sub">Non-negotiable. Everything below assumes these.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Preserve first, act surgically, never release blind</h3>
+    <p>Never remove a hold without written authorization from the owner of <em>that specific matter</em> — approval for Matter A never authorizes touching Matter B, even on the same mailboxes. Never delete a policy to release a subset of custodians (deleting a policy releases <em>everyone</em>). When the data is ambiguous, stop and escalate — inactive mailboxes and orphaned policies fail <em>safe</em>, so keep preserving. Document every read-only finding before any write.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">01</span>The four mailbox states</h2>
+<p class="sub">State determines what's possible — and where the danger lives.</p>
+
+<figure>
+<svg viewBox="0 0 720 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Four mailbox states and how to detect each: active via Get-Mailbox, inactive via -InactiveMailboxOnly, soft-deleted via -SoftDeletedMailbox, and gone which returns nothing.">
+<g font-family="IBM Plex Sans,sans-serif">
+  <rect x="8" y="34" width="168" height="94" rx="12" fill="#EDF3E0" stroke="#3B6D11" stroke-width="1"/>
+  <text x="92" y="58" text-anchor="middle" font-size="13" font-weight="600" fill="#274F0A">Active</text>
+  <text x="92" y="80" text-anchor="middle" font-size="10.5" fill="#5A6472">normal licensed mailbox</text>
+  <text x="92" y="106" text-anchor="middle" font-size="10" font-family="IBM Plex Mono,monospace" fill="#3B6D11">Get-Mailbox</text>
+
+  <rect x="184" y="34" width="168" height="94" rx="12" fill="#E1F0EB" stroke="#0F6E56" stroke-width="1"/>
+  <text x="268" y="58" text-anchor="middle" font-size="13" font-weight="600" fill="#0B4A3A">Inactive</text>
+  <text x="268" y="76" text-anchor="middle" font-size="10.5" fill="#5A6472">deleted, but preserved</text>
+  <text x="268" y="90" text-anchor="middle" font-size="10.5" fill="#5A6472">by a hold</text>
+  <text x="268" y="112" text-anchor="middle" font-size="9.5" font-family="IBM Plex Mono,monospace" fill="#0F6E56">-InactiveMailboxOnly</text>
+
+  <rect x="360" y="34" width="168" height="94" rx="12" fill="#FBF1DC" stroke="#B0700C" stroke-width="1"/>
+  <text x="444" y="58" text-anchor="middle" font-size="13" font-weight="600" fill="#6B430A">Soft-deleted</text>
+  <text x="444" y="76" text-anchor="middle" font-size="10.5" fill="#5A6472">deleted &lt;30d,</text>
+  <text x="444" y="90" text-anchor="middle" font-size="10.5" fill="#5A6472">recoverable</text>
+  <text x="444" y="112" text-anchor="middle" font-size="9.5" font-family="IBM Plex Mono,monospace" fill="#B0700C">-SoftDeletedMailbox</text>
+
+  <rect x="536" y="34" width="176" height="94" rx="12" fill="#FBE9E9" stroke="#A32D2D" stroke-width="1"/>
+  <text x="624" y="58" text-anchor="middle" font-size="13" font-weight="600" fill="#7A1F1F">Gone / purged</text>
+  <text x="624" y="76" text-anchor="middle" font-size="10.5" fill="#7A1F1F">destroyed, past</text>
+  <text x="624" y="90" text-anchor="middle" font-size="10.5" fill="#7A1F1F">recovery</text>
+  <text x="624" y="112" text-anchor="middle" font-size="9.5" font-family="IBM Plex Mono,monospace" fill="#A32D2D">returns nothing</text>
+</g>
+</svg>
+<figcaption><b>The inactive-mailbox rule.</b> An inactive mailbox exists <em>only</em> because a hold preserves it. Remove the last hold and it becomes eligible for permanent, unrecoverable purge. That's the single most dangerous action in this entire domain.</figcaption>
+</figure>
+
+<p>Holds also stack — a mailbox can carry several at once, and <span class="k">LitigationHoldEnabled = False</span> does <em>not</em> mean "not held," because a Purview case hold preserves independently of that flag. Hold GUIDs in <span class="k">InPlaceHolds</span> carry a prefix: <span class="k">UniH…</span> is a Purview/eDiscovery case hold, <span class="k">mbx…</span> a legacy in-place hold, and a bare 32-hex value is usually org-wide retention.</p>
+
+<h2 class="head"><span class="num">02</span>Pick your scenario</h2>
+<p class="sub">Twelve cases, grouped by what you're being asked to do. Click one.</p>
+
+<div class="switch">
+  <div class="sw-group">
+    <p class="sw-glabel">Place a hold</p>
+    <div class="sw-pills">
+      <button class="sw-pill active" data-target="p1"><span class="n">01</span> Active mailbox <span class="rk rk-routine">routine</span></button>
+      <button class="sw-pill" data-target="p2"><span class="n">02</span> Inactive mailbox <span class="rk rk-care">care</span></button>
+      <button class="sw-pill" data-target="p3"><span class="n">03</span> Mailbox is gone <span class="rk rk-high">escalate</span></button>
+    </div>
+  </div>
+  <div class="sw-group">
+    <p class="sw-glabel">Release a hold</p>
+    <div class="sw-pills">
+      <button class="sw-pill" data-target="p4"><span class="n">04</span> Mailbox-level LitHold <span class="rk rk-care">care</span></button>
+      <button class="sw-pill" data-target="p5"><span class="n">05</span> One custodian, healthy case <span class="rk rk-routine">correct way</span></button>
+      <button class="sw-pill" data-target="p6"><span class="n">06</span> Retention policy <span class="rk rk-care">care</span></button>
+      <button class="sw-pill" data-target="p7"><span class="n">07</span> Multiple matters <span class="rk rk-high">high-risk</span></button>
+      <button class="sw-pill" data-target="p8"><span class="n">08</span> Last hold on inactive <span class="rk rk-high">max caution</span></button>
+      <button class="sw-pill" data-target="p9"><span class="n">09</span> Orphaned case hold <span class="rk rk-high">escalate</span></button>
+    </div>
+  </div>
+  <div class="sw-group">
+    <p class="sw-glabel">Content search</p>
+    <div class="sw-pills">
+      <button class="sw-pill" data-target="p10"><span class="n">10</span> Active mailbox <span class="rk rk-routine">routine</span></button>
+      <button class="sw-pill" data-target="p11"><span class="n">11</span> Inactive mailbox <span class="rk rk-care">care</span></button>
+      <button class="sw-pill" data-target="p12"><span class="n">12</span> Hold + search <span class="rk rk-care">care</span></button>
+    </div>
+  </div>
+
+  <div class="sw-panels">
+
+    <div class="sw-panel active" id="p1">
+      <h3>Place a hold on an active mailbox <span class="rk rk-routine">routine</span></h3>
+      <p class="sit">Preserve a current employee's data. Two mechanisms; prefer the case hold for anything that may become eDiscovery.</p>
+      <span class="steplab act">Option A — mailbox-level litigation hold (whole mailbox, simplest)</span>
+<pre class="code"><b>Set-Mailbox</b> -Identity "departed.user@contoso.com" `
+  -LitigationHoldEnabled $true `
+  -LitigationHoldDuration Unlimited `
+  -LitigationHoldOwner "Legal - Matter 12345"</pre>
+      <span class="steplab act">Option B — Purview case hold (preferred; tracked &amp; scoped)</span>
+<pre class="code"><span class="muted"># 1. create the eDiscovery case (skip if it exists)</span>
+<b>New-ComplianceCase</b> -Name "Matter 12345 - Contoso v. Example" `
+  -Description "Litigation hold for Matter 12345"
+<span class="muted"># 2. create the hold policy, scope the custodian(s)</span>
+<b>New-CaseHoldPolicy</b> -Name "Matter12345-ExchangeHold" `
+  -Case "Matter 12345 - Contoso v. Example" `
+  -ExchangeLocation "departed.user@contoso.com"
+<span class="muted"># 3. create the rule. An empty rule (no query) holds EVERYTHING.</span>
+<b>New-CaseHoldRule</b> -Name "Matter12345-Rule" -Policy "Matter12345-ExchangeHold"</pre>
+      <span class="steplab ver">Verify</span>
+<pre class="code"><b>Get-Mailbox</b> "departed.user@contoso.com" |
+  Select-Object LitigationHoldEnabled,
+    @{N='InPlaceHolds';E={$_.InPlaceHolds -join '; '}}</pre>
+      <div class="sw-caution"><b>Caution:</b> use a case hold for anything that may become eDiscovery. Allow propagation time before you verify.</div>
+    </div>
+
+    <div class="sw-panel" id="p2">
+      <h3>Place a hold on an inactive mailbox <span class="rk rk-care">care</span></h3>
+      <p class="sit">Preserve a departed employee whose mailbox is already inactive. Add it by <span class="k">DistinguishedName</span> — the most reliable identifier for inactive mailboxes.</p>
+      <span class="steplab diag">Diagnosis</span>
+<pre class="code"><b>Get-Mailbox</b> -InactiveMailboxOnly -Identity "departed.user@contoso.com" |
+  Select-Object DisplayName, IsInactiveMailbox, DistinguishedName, WhenSoftDeleted,
+    @{N='InPlaceHolds';E={$_.InPlaceHolds -join '; '}}</pre>
+      <span class="steplab act">Action — add by DistinguishedName</span>
+<pre class="code">$dn = (<b>Get-Mailbox</b> -InactiveMailboxOnly `
+  -Identity "departed.user@contoso.com").DistinguishedName
+<b>Set-CaseHoldPolicy</b> -Identity "Matter12345-ExchangeHold" -AddExchangeLocation $dn</pre>
+      <div class="sw-caution"><b>Caution:</b> an inactive mailbox is already held by <em>something</em> — that's the only reason it still exists. Confirm what's holding it before you add another.</div>
+    </div>
+
+    <div class="sw-panel" id="p3">
+      <h3>Asked to hold a mailbox that is gone <span class="rk rk-high">escalate</span></h3>
+      <p class="sit">Nothing left to preserve. All three state checks return nothing.</p>
+      <span class="steplab diag">Diagnosis — all three return nothing → it's gone</span>
+<pre class="code"><b>Get-Mailbox</b> "departed.user@contoso.com" -ErrorAction SilentlyContinue
+<b>Get-Mailbox</b> -InactiveMailboxOnly -Identity "departed.user@contoso.com" -ErrorAction SilentlyContinue
+<b>Get-Mailbox</b> -SoftDeletedMailbox -Identity "departed.user@contoso.com" -ErrorAction SilentlyContinue</pre>
+      <div class="sw-caution stop"><b>STOP.</b> Nothing remains to hold — this may itself be a preservation failure. Document it and escalate to the matter owner immediately. Do <em>not</em> report it as "done."</div>
+    </div>
+
+    <div class="sw-panel" id="p4">
+      <h3>Release a mailbox-level litigation hold <span class="rk rk-care">care</span></h3>
+      <p class="sit">A single-mechanism release — only after confirming no other matter needs this mailbox.</p>
+      <span class="steplab diag">Diagnosis</span>
+<pre class="code"><b>Get-Mailbox</b> "departed.user@contoso.com" |
+  Select-Object LitigationHoldEnabled, ComplianceTagHoldApplied,
+    @{N='InPlaceHolds';E={$_.InPlaceHolds -join '; '}}</pre>
+      <span class="steplab act">Action</span>
+<pre class="code"><b>Set-Mailbox</b> -Identity "departed.user@contoso.com" -LitigationHoldEnabled $false</pre>
+      <div class="sw-caution"><b>Caution:</b> this triggers <span class="k">DelayHoldApplied</span> (~30 days) — data isn't purged instantly. Any case holds or retention holds on the mailbox <em>remain</em>; this only clears the mailbox flag.</div>
+    </div>
+
+    <div class="sw-panel" id="p5">
+      <h3>Release one custodian from a healthy case hold <span class="rk rk-routine">correct way</span></h3>
+      <p class="sit">The surgical release — drop one or two custodians and preserve everyone else. Safe <em>because</em> the parent case still exists.</p>
+      <span class="steplab diag">Diagnosis — confirm the parent case still exists</span>
+<pre class="code">$policy = <b>Get-CaseHoldPolicy</b> -Identity "&lt;policy-guid&gt;"
+$policy | Format-List Name, CaseId, Enabled, Mode
+<span class="muted"># the parent case must resolve — if this returns the case, you're clear:</span>
+<b>Get-ComplianceCase</b> -Identity $policy.CaseId</pre>
+      <span class="steplab act">Action — remove ONLY the custodian(s)</span>
+<pre class="code"><b>Set-CaseHoldPolicy</b> -Identity "&lt;policy-guid&gt;" `
+  -RemoveExchangeLocation @("departed.user@contoso.com","second.user@contoso.com")</pre>
+      <div class="sw-caution stop"><b>Never</b> use <span class="k">Remove-CaseHoldPolicy</span> to release a subset — that drops <em>everyone</em>. <span class="k">-RemoveExchangeLocation</span> is the surgical tool.</div>
+    </div>
+
+    <div class="sw-panel" id="p6">
+      <h3>Mailbox held by a retention policy <span class="rk rk-care">care</span></h3>
+      <p class="sit">A governance hold, not a matter hold. Detected via <span class="k">ComplianceTagHoldApplied</span>.</p>
+      <span class="steplab diag">Diagnosis</span>
+<pre class="code"><b>Get-Mailbox</b> "departed.user@contoso.com" | Select-Object ComplianceTagHoldApplied
+<b>Get-RetentionCompliancePolicy</b> | Format-Table Name, Enabled, Mode -AutoSize
+<span class="muted"># which mailboxes a given policy scopes:</span>
+<b>Get-RetentionCompliancePolicy</b> -Identity "&lt;retention-policy-name&gt;" -DistributionDetail |
+  Select-Object -ExpandProperty ExchangeLocation</pre>
+      <div class="sw-caution"><b>Caution:</b> retention policies are usually broad or org-wide. Do <em>not</em> disable the whole policy for one mailbox — use an exclusion, or hand it to the data-governance / legal owner.</div>
+    </div>
+
+    <div class="sw-panel" id="p7">
+      <h3>Mailbox on holds from multiple matters <span class="rk rk-high">high-risk</span></h3>
+      <p class="sit">The most common real-world trap. List every hold GUID and resolve each to its matter before touching anything.</p>
+      <span class="steplab diag">Diagnosis — resolve each GUID to its policy + case</span>
+<pre class="code">$holds = (<b>Get-Mailbox</b> "departed.user@contoso.com").InPlaceHolds
+foreach ($h in $holds) {
+  $guid = $h -replace '^UniH',''            <span class="muted"># strip the UniH prefix</span>
+  <b>Get-CaseHoldPolicy</b> -Identity $guid -ErrorAction SilentlyContinue |
+    Select-Object Name, CaseId, @{N='GUID';E={$_.Guid}}
+}</pre>
+      <div class="sw-caution stop"><b>The trap.</b> "Remove all holds" from a single-matter requester does <em>not</em> mean all matters. Release only the holds for the matter you're authorized for, flag every other matter's hold, leave it intact, and notify the requester.</div>
+    </div>
+
+    <div class="sw-panel" id="p8">
+      <h3>Release where this is the last hold on an inactive mailbox <span class="rk rk-high">max caution</span></h3>
+      <p class="sit">Irreversible. Removing the only hold on an inactive mailbox authorizes its destruction.</p>
+      <span class="steplab diag">Diagnosis — confirm this hold is the ONLY thing preserving it</span>
+<pre class="code"><b>Get-Mailbox</b> -InactiveMailboxOnly -Identity "departed.user@contoso.com" |
+  Select-Object IsInactiveMailbox, LitigationHoldEnabled, ComplianceTagHoldApplied,
+    RetentionHoldEnabled, DelayHoldApplied,
+    @{N='InPlaceHolds';E={$_.InPlaceHolds -join '; '}}
+<span class="muted"># one hold in InPlaceHolds + everything else False = this hold is the ONLY thing preserving it</span></pre>
+      <div class="sw-caution stop"><b>STOP.</b> Removing this hold leaves the inactive mailbox with nothing → eligible for permanent purge. Get the matter owner to confirm <em>in writing</em> that the data is cleared for disposal — you are authorizing destruction. Any doubt → leave the hold.</div>
+    </div>
+
+    <div class="sw-panel" id="p9">
+      <h3>Orphaned case hold — parent case deleted <span class="rk rk-high">escalate</span></h3>
+      <p class="sit">The policy is still Enabled/Enforce, but its parent case was deleted. <span class="k">Get-</span> reads it; per-custodian <span class="k">Set-</span> fails with "policy wasn't found." See the full worked example below.</p>
+      <span class="steplab diag">Diagnosis — confirm the parent case is gone</span>
+<pre class="code">$policy = <b>Get-CaseHoldPolicy</b> -Identity "&lt;policy-guid&gt;" -DistributionDetail
+$policy | Format-List Name, Guid, Enabled, Mode, CaseId, DistributionStatus
+<span class="muted"># nothing back = the case is deleted = ORPHANED</span>
+<b>Get-ComplianceCase</b> -Identity $policy.CaseId -ErrorAction SilentlyContinue</pre>
+      <div class="sw-caution stop"><b>DO NOT</b> run <span class="k">Remove-CaseHoldPolicy -ForceDeletion</span> to "fix" it — that's the only command that executes, and it releases <em>all</em> custodians (and can make inactive mailboxes purge-eligible). Escalate to Microsoft Support for orphaned-policy remediation and get the matter owner's written status. The full sequence is in the worked example below.</div>
+    </div>
+
+    <div class="sw-panel" id="p10">
+      <h3>Content search on an active mailbox <span class="rk rk-routine">routine</span></h3>
+      <p class="sit">Search reads — it does <em>not</em> preserve. If preservation is also needed, apply a hold first.</p>
+      <span class="steplab act">Action</span>
+<pre class="code"><span class="muted"># 1. create the search with a KQL content query</span>
+<b>New-ComplianceSearch</b> -Name "Matter12345-Search" `
+  -ExchangeLocation "departed.user@contoso.com" `
+  -ContentMatchQuery 'subject:"contract" AND received&gt;=01/01/2025'
+<span class="muted"># 2. run it</span>
+<b>Start-ComplianceSearch</b> -Identity "Matter12345-Search"
+<span class="muted"># 3. check results</span>
+<b>Get-ComplianceSearch</b> -Identity "Matter12345-Search" |
+  Select-Object Name, Status, Items, Size</pre>
+      <div class="sw-caution"><b>Note:</b> search does not preserve. If preservation is also needed, apply a hold (Scenario 01) — searching alone won't stop deletion.</div>
+    </div>
+
+    <div class="sw-panel" id="p11">
+      <h3>Content search on an inactive mailbox <span class="rk rk-care">care</span></h3>
+      <p class="sit">Searchable while retained. Search <em>before</em> releasing — never the reverse.</p>
+      <span class="steplab act">Action — resolve the DistinguishedName first</span>
+<pre class="code">$im = <b>Get-Mailbox</b> -InactiveMailboxOnly -Identity "departed.user@contoso.com"
+<b>New-ComplianceSearch</b> -Name "Matter12345-InactiveSearch" `
+  -ExchangeLocation $im.DistinguishedName `
+  -AllowNotFoundExchangeLocationsEnabled $true
+<b>Start-ComplianceSearch</b> -Identity "Matter12345-InactiveSearch"</pre>
+      <div class="sw-caution"><b>Note:</b> remove the last hold first and the mailbox may purge and become unsearchable. Search before releasing.</div>
+    </div>
+
+    <div class="sw-panel" id="p12">
+      <h3>"Apply a hold AND run a content search" <span class="rk rk-care">care</span></h3>
+      <p class="sit">Preserve, then collect — the ordering matters.</p>
+      <span class="steplab act">Correct order</span>
+<pre class="code">1. Confirm the mailbox still exists (active or inactive).
+2. Apply / confirm the hold so nothing is lost during collection  (Scenario 01 / 02).
+3. THEN run the content search                                    (Scenario 10 / 11).
+4. Export / collect via the eDiscovery case as authorized.</pre>
+      <div class="sw-caution stop"><b>Never</b> run only a content search when preservation was requested — search doesn't preserve. And never release a hold before collection is complete.</div>
+    </div>
+
+  </div>
+</div>
+
+<h2 class="head"><span class="num">03</span>Worked example — the orphaned hold</h2>
+<p class="sub">A real investigation, anonymized. The star scenario, end to end.</p>
+
+<p>A paralegal (Legal, "Matter A") requests release of <strong>46 mailboxes</strong> from the Matter A hold. She adds one line that becomes the whole story: <em>"if any of these are on hold for another matter, tell me before releasing."</em> Honor that instruction and it changes everything.</p>
+
+<figure>
+<svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The orphaned-hold resolution: create a new clean hold with a proper case over the affected custodians, wait for propagation and verify, then force-delete the orphaned policy — preservation stays continuous throughout.">
+<defs><marker id="oa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#8A93A1" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<text x="360" y="22" text-anchor="middle" font-family="Space Grotesk,sans-serif" font-size="14" font-weight="600" fill="#0E1521">Why you can't just delete an orphaned policy</text>
+<g font-family="IBM Plex Sans,sans-serif">
+  <rect x="8" y="42" width="210" height="70" rx="12" fill="#FBE9E9" stroke="#A32D2D" stroke-width="1"/>
+  <text x="113" y="66" text-anchor="middle" font-size="12" font-weight="600" fill="#7A1F1F">Orphaned policy</text>
+  <text x="113" y="84" text-anchor="middle" font-size="10" fill="#7A1F1F">parent case deleted · still enforcing</text>
+  <text x="113" y="100" text-anchor="middle" font-size="10" fill="#7A1F1F">holds 72 (14 inactive-only)</text>
+
+  <rect x="8" y="128" width="210" height="60" rx="12" fill="#FBF1DC" stroke="#B0700C" stroke-width="1"/>
+  <text x="113" y="150" text-anchor="middle" font-size="11" font-weight="600" fill="#6B430A">Surgical remove FAILS</text>
+  <text x="113" y="168" text-anchor="middle" font-size="9.5" font-family="IBM Plex Mono,monospace" fill="#6B430A">Set-CaseHoldPolicy → not found</text>
+  <text x="113" y="181" text-anchor="middle" font-size="9.5" fill="#5A6472">only ForceDeletion runs → drops ALL</text>
+
+  <text x="250" y="120" font-size="13" fill="#5A6472">The safe path:</text>
+  <rect x="250" y="42" width="220" height="52" rx="11" fill="#EDF3E0" stroke="#3B6D11" stroke-width="1"/>
+  <text x="360" y="63" text-anchor="middle" font-size="11.5" font-weight="600" fill="#274F0A">1 · Create NEW hold + case</text>
+  <text x="360" y="80" text-anchor="middle" font-size="9.5" fill="#5A6472">scope the custodians who must stay held</text>
+  <line x1="360" y1="94" x2="360" y2="132" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#oa)"/>
+  <rect x="250" y="132" width="220" height="52" rx="11" fill="#E1F0EB" stroke="#0F6E56" stroke-width="1"/>
+  <text x="360" y="153" text-anchor="middle" font-size="11.5" font-weight="600" fill="#0B4A3A">2 · Wait 24h · dual-verify</text>
+  <text x="360" y="170" text-anchor="middle" font-size="9.5" fill="#5A6472">new hold is binding on every mailbox</text>
+  <line x1="470" y1="158" x2="502" y2="158" stroke="#8A93A1" stroke-width="1.4" marker-end="url(#oa)"/>
+  <rect x="502" y="132" width="210" height="52" rx="11" fill="#EDF3E0" stroke="#3B6D11" stroke-width="1"/>
+  <text x="607" y="153" text-anchor="middle" font-size="11.5" font-weight="600" fill="#274F0A">3 · Now delete the orphan</text>
+  <text x="607" y="170" text-anchor="middle" font-size="9.5" fill="#5A6472">preservation never lapsed</text>
+</g>
+</svg>
+<figcaption><b>The elegant way out.</b> You can't remove one custodian from an orphaned policy without the parent case, and deleting the policy drops everyone. So you stand up a <em>new</em>, clean hold over the custodians who must stay preserved, confirm it's binding, and only then remove the orphan — the new hold carries preservation continuously, so nothing is ever unprotected.</figcaption>
+</figure>
+
+<p><strong>Step 1 — verify holds on every mailbox.</strong> 41 come back clean; 5 are <span class="k">STILL HELD</span> by a GUID that doesn't belong to Matter A. That's the requester's "another matter" — exactly what she asked to be warned about.</p>
+
+<p><strong>Step 2 — resolve the mystery GUID.</strong> It's a live, enforced hold ("Matter B") scoping 72 custodians firm-wide; the 5 mailboxes are just members of it.</p>
+
+<p><strong>Step 3 — check the parent case.</strong> The <span class="k">CaseId</span> no longer resolves — the case was deleted from Purview while the hold kept enforcing. Orphaned.</p>
+
+<p><strong>Step 4 — the surgical removal is blocked.</strong> <span class="k">Set-CaseHoldPolicy -RemoveExchangeLocation</span> fails with "policy wasn't found," because the write path needs the missing case. The only command that would execute is full deletion of the policy.</p>
+
+<p><strong>Step 5 — why force-delete is not the answer.</strong> Of the 72 custodians, <strong>14 are soft-deleted inactive mailboxes whose only hold is this orphaned policy</strong> — some preserved for years. Deleting the policy makes all 14 eligible for permanent, unrecoverable purge. Force-delete is off the table.</p>
+
+<p><strong>Step 6 — the resolution.</strong> Matter A: all 46 released, as requested — done. The 5: cleared of Matter A but left fully intact on the orphaned Matter B hold. Then the safe remediation for the orphan itself: <em>create a new eDiscovery hold with a proper case scoped to the custodians who must stay held, wait for propagation, dual-verify it's binding on every mailbox, and only then force-delete the orphan.</em> Because the new hold now preserves everyone, removing the orphan never leaves anyone unprotected — and the out-of-scope custodians stay held under a policy that's actually manageable. Nothing was force-removed without that safety net in place; the state reports went to the Matter B owner and Microsoft Support.</p>
+
+<div class="takeaway">
+  <p class="tag">The distilled lessons</p>
+  <p>The requester's own <em>"warn me if it's another matter"</em> is the trigger that should stop a release — honor it. "Remove all holds" never authorizes touching a different matter. An orphaned policy blocks the <em>safe</em> tool and leaves only the <em>dangerous</em> one — that's a signal to escalate, not to force. And always check for inactive mailboxes before any policy-level action: they're the ones that get destroyed.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/purview/ediscovery-create-holds">Create eDiscovery holds — Microsoft Learn</a><span>case holds, policies, and rules</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/exchange/recipients-in-exchange-online/manage-inactive-mailboxes/manage-inactive-mailboxes">Manage inactive mailboxes — Microsoft Learn</a><span>the preserve-after-deletion lifecycle</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/purview/ediscovery-content-search">Content search — Microsoft Learn</a><span>New-/Start-/Get-ComplianceSearch</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/powershell/module/exchange/get-mailbox">Get-Mailbox reference — Microsoft Learn</a><span>InPlaceHolds, inactive and soft-deleted parameters</span></li>
+</ul>
+</div>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/forensics/">Forensics</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+<script>
+(function(){
+  var pills = document.querySelectorAll('.sw-pill');
+  var panels = document.querySelectorAll('.sw-panel');
+  function show(id){
+    for (var i=0;i<panels.length;i++){ panels[i].classList.toggle('active', panels[i].id===id); }
+    for (var j=0;j<pills.length;j++){ pills[j].classList.toggle('active', pills[j].getAttribute('data-target')===id); }
+  }
+  for (var k=0;k<pills.length;k++){
+    pills[k].addEventListener('click', function(){ show(this.getAttribute('data-target')); });
+  }
+})();
+</script>
+
+</body>
+</html>

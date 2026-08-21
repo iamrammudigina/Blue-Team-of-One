@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Migrating MMA to AMA at fleet scale with Azure Policy — Blue Team of One</title>
+<meta name="description" content="Moving from the legacy Log Analytics agent to the Azure Monitor Agent across a whole fleet using Azure Policy DeployIfNotExists — the DCR associations that actually make telemetry flow, and the health-workbook false-negatives that send people chasing phantom problems.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=22">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/" aria-current="page">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/cloud/">Cloud Security</a><span class="sep">›</span><a href="/cloud/posture.html">Cloud posture</a></p>
+    <p class="eyebrow"><span class="dot"></span>Cloud posture · monitoring agents</p>
+    <h1>Migrating MMA to AMA <em>at fleet scale with Azure Policy</em></h1>
+    <p class="lede">The legacy Log Analytics agent is retired, so every VM needs the Azure Monitor Agent instead. Installing it by hand across a fleet doesn't scale — and worse, the health workbook you'd use to check coverage lies to you, showing agents as "missing" when they're installed and running. Here's the policy-driven migration, and the false-negative trap that sends people chasing ghosts.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 14, 2026</span>
+      <span>~11 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>The Microsoft Monitoring Agent (MMA, the old Log Analytics agent) is deprecated; the Azure Monitor Agent (AMA) replaces it. On a handful of VMs you'd just install AMA and move on. Across a real fleet — dozens or hundreds of servers, some spun up after you started — manual installs guarantee gaps: you'll miss machines, and new ones will arrive with no agent at all. The scalable answer is <strong>Azure Policy</strong>, which installs and configures AMA automatically on any VM that's missing it, existing or future.</p>
+
+<h2 class="head"><span class="num">01</span>The pieces that make telemetry flow</h2>
+<p class="sub">The agent alone collects nothing — the DCR association is what matters.</p>
+
+<p>The single most common AMA mistake is thinking the agent is the job. It isn't. AMA is just a pipe; what it collects and where it sends data is defined entirely by a <strong>Data Collection Rule (DCR)</strong>, and the DCR only applies to a VM once there's a <strong>DCR association</strong> linking them. Three parts, and all three must be present:</p>
+
+<table class="cmp">
+  <tr><th>Piece</th><th>Role</th><th>If it's missing</th></tr>
+  <tr><td><strong>AMA extension</strong></td><td>The agent on the VM</td><td>No agent — nothing to collect</td></tr>
+  <tr><td><strong>Data Collection Rule</strong></td><td>Defines what to collect and the destination workspace</td><td>Agent runs but has no instructions</td></tr>
+  <tr><td><strong>DCR association</strong></td><td>Links the DCR to the VM</td><td><strong>Agent installed, but collects nothing</strong> — the silent failure</td></tr>
+</table>
+
+<p>That third row is the crux of this whole post. An AMA that's installed but has no DCR association looks healthy in the portal — the extension shows "provisioned" — yet sends zero telemetry. Remember it; it explains the workbook problem in Part 04.</p>
+
+<h2 class="head"><span class="num">02</span>Why policy-driven</h2>
+<p class="sub">DeployIfNotExists installs and associates automatically — on existing and future VMs.</p>
+
+<p>Azure Policy has built-in <strong>DeployIfNotExists (DINE)</strong> policies for AMA. Assigned to a subscription or management group, they evaluate every VM and, where the agent or association is missing, deploy it. New VMs are caught automatically at creation; existing VMs are fixed by a <strong>remediation task</strong>. This is the difference between a migration you finish and one that quietly regresses every time someone spins up a server.</p>
+
+<pre class="code"><span class="muted"># the policy-driven migration, in order</span>
+1. Assign the AMA DINE policy initiative to the subscription / MG
+   - "Configure Windows/Linux VMs to run Azure Monitor Agent"
+   - "Configure DCR association" policy for your DCR
+2. Provide a user-assigned managed identity for AMA auth
+3. Create the remediation task → installs AMA + associates the DCR
+   on all EXISTING non-compliant VMs
+4. New VMs are handled automatically going forward (DINE at create)
+5. Validate telemetry, THEN remove MMA</pre>
+
+<h2 class="head"><span class="num">03</span>Validate before you remove MMA</h2>
+<p class="sub">Prove AMA is actually sending data — from the data, not the portal.</p>
+
+<p>Never uninstall MMA on the assumption AMA took over. Prove it with the telemetry itself — query the workspace for recent heartbeats from the AMA agent:</p>
+
+<pre class="code"><span class="muted">// confirm AMA is actually reporting, per machine</span>
+Heartbeat
+| where TimeGenerated &gt; ago(30m)
+| where Category == "Azure Monitor Agent"
+| summarize LastBeat = max(TimeGenerated) by Computer
+| sort by LastBeat desc</pre>
+
+<p>A machine appearing here, with a recent timestamp and the AMA category, is genuinely collecting. Only once a VM shows healthy AMA heartbeats should MMA be removed from it. Do this per-machine or in batches — not fleet-wide on faith.</p>
+
+<h2 class="head"><span class="num">04</span>The trap — the health workbook lies <span class="rk rk-high">gotcha</span></h2>
+<p class="sub">VMs show "not installed" while the portal shows AMA running. Don't chase it.</p>
+
+<p>Here's the one that wastes an afternoon. The AMA Health Workbook (in Sentinel/Monitor) will show some VMs as <strong>"Not Installed"</strong> or <strong>"Missing Agent"</strong> — while the Azure portal, on those exact same VMs, shows the AMA extension installed and active. Both can't be right, and the instinct is to reinstall agents that are already there.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>It's a reporting artifact, not a missing agent</h3>
+    <p>The workbook infers agent state from <strong>telemetry</strong> — Heartbeat data and Resource Graph — not from the extension's actual presence. So it reads as "missing" when that telemetry is <em>delayed</em> or, more importantly, when the VM has <strong>no DCR association</strong> (installed agent, but no instructions, so no heartbeat — exactly the Part 01 silent failure). The agent is fine; the <em>data path</em> is the problem. Reinstalling the agent does nothing; <strong>fixing the DCR association</strong> does.</p>
+  </div>
+</div>
+
+<p>So when the workbook and the portal disagree, trust the portal (and the <span class="k">Heartbeat</span> query above) for agent presence, and treat the workbook's "missing" as a signal to <strong>check the DCR association</strong>, not the agent. The clean fix is exactly the same policy mechanism: a DINE policy that ensures every AMA-equipped VM has the correct DCR association applied — remediating the data path rather than the agent.</p>
+
+<h2 class="head"><span class="num">05</span>The migration, end to end</h2>
+<p class="sub">Assess → deploy by policy → associate → validate → remove.</p>
+
+<pre class="code"><span class="muted"># the full sequence</span>
+Assess    inventory VMs still on MMA (legacy Log Analytics agent)
+Deploy    assign AMA DINE policy + DCR-association policy; run remediation
+Associate confirm every AMA VM has a DCR association (this is the real work)
+Validate  Heartbeat query shows recent AMA beats per machine
+Remove    uninstall MMA only from validated machines
+Confirm   workbook health normalises once associations + heartbeats exist</pre>
+
+<div class="takeaway">
+  <p class="tag">The takeaway</p>
+  <p>Migrate MMA→AMA with Azure Policy DINE so both existing and future VMs are covered automatically — but remember the agent is only a third of the job: without a <strong>DCR association</strong> it collects nothing. Validate migration from <span class="k">Heartbeat</span> data, not the portal's "provisioned" status, and don't be fooled by the health workbook showing installed agents as "missing" — that's a delayed-telemetry / missing-association artifact, fixed by remediating the DCR association, never by reinstalling the agent.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/azure/azure-monitor/agents/azure-monitor-agent-migration">Migrate to Azure Monitor Agent — Microsoft Learn</a><span>the MMA→AMA migration path</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/azure/azure-monitor/agents/azure-monitor-agent-policy">Manage AMA with Azure Policy</a><span>the DINE policies and remediation</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/data-collection-rule-associations">Data collection rule associations</a><span>the piece that actually makes telemetry flow</span></li>
+</ul>
+</div>
+
+<p class="disclaimer" style="color:var(--ink-3);font-size:13px;margin-top:28px">Anonymized from real deployment work; host, DCR, and workspace names have been replaced with generic examples.</p>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/cloud/">Cloud Security</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>

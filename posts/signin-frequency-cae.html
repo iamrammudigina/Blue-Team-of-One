@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign-in frequency is a blunt instrument — CAE is the scalpel — Blue Team of One</title>
+<meta name="description" content="Why static sign-in frequency alone leaves long-lived tokens valid after a user is disabled, and how Continuous Access Evaluation (CAE) revokes access in near-real-time — plus how to configure the two together.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=22">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/" aria-current="page">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/identity/">Identity Security</a><span class="sep">›</span><a href="/identity/conditional-access.html">Conditional Access</a></p>
+    <p class="eyebrow"><span class="dot"></span>Conditional Access · session control</p>
+    <h1>Sign-in frequency is a blunt instrument — <em>CAE is the scalpel</em></h1>
+    <p class="lede">You disable a compromised user at 10:00. With sign-in frequency alone, their already-issued token can keep working for hours. Continuous Access Evaluation closes that window to minutes — or seconds. Here's why the two solve different problems, and how to configure them to work together.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 14, 2026</span>
+      <span>~10 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>Most people reach for <strong>sign-in frequency</strong> when they want tighter session control, crank it down, and assume they've solved token risk. They haven't — because sign-in frequency only governs when a user is <em>periodically</em> forced to re-authenticate, not what happens the instant something goes wrong mid-session. The two mechanisms below answer different questions, and you need both.</p>
+
+<h2 class="head"><span class="num">01</span>Why sign-in frequency alone is weak</h2>
+<p class="sub">It's a timer, not a trigger.</p>
+
+<p>Sign-in frequency is a Conditional Access session control that forces re-authentication after a set interval (hours or days). The problem is baked into how OAuth tokens work: an <strong>access token</strong> is typically valid for about an hour, and behind it a long-lived <strong>refresh token</strong> silently mints new access tokens. So if you disable a user, reset their password, or detect that their session is compromised, their existing access token keeps working until it expires — and sign-in frequency does nothing to pull it back early.</p>
+
+<div class="analogy">
+  <p class="tag">The gap, concretely</p>
+  <p>Set sign-in frequency to 8 hours and you've decided how often to <em>ask again</em>. You have <em>not</em> decided how fast you can <em>cut someone off</em>. An attacker who stole a token at 09:00 keeps access until roughly 10:00 (token expiry) even if you disabled the account at 09:05 — a blunt timer can't react to the event that just happened.</p>
+</div>
+
+<h2 class="head"><span class="num">02</span>What CAE actually does</h2>
+<p class="sub">Near-real-time revocation, driven by events instead of clocks.</p>
+
+<p><strong>Continuous Access Evaluation (CAE)</strong> establishes a channel between Entra ID and CAE-capable resource providers (Exchange Online, SharePoint, Teams, Microsoft Graph). Instead of trusting an access token blindly until expiry, the resource provider <em>listens</em> for critical security events from Entra and rejects the token the moment one fires — without waiting for the clock. The events that trigger near-instant revocation:</p>
+
+<table class="cmp">
+  <tr><th>Critical event</th><th>What CAE does</th></tr>
+  <tr><td>User account disabled or deleted</td><td>Existing tokens rejected within minutes</td></tr>
+  <tr><td>Password changed / reset</td><td>Sessions invalidated near-instantly</td></tr>
+  <tr><td>Admin explicitly revokes tokens</td><td>All sessions dropped</td></tr>
+  <tr><td>Elevated user risk detected (Entra ID Protection)</td><td>Token challenged / revoked</td></tr>
+  <tr><td>Location change (with strict location enforcement)</td><td>Token re-evaluated against CA network conditions</td></tr>
+</table>
+
+<p>The mechanism: a CAE-capable client presents its token to, say, Exchange; if a critical event has occurred, the resource returns a <strong>claims challenge</strong> (a 401 with a specific claim) instead of serving data, forcing the client back to Entra to obtain a fresh token — which now fails because the account is disabled. That round-trip is what collapses the revocation window from "up to an hour" to "a few minutes."</p>
+
+<h2 class="head"><span class="num">03</span>Configure them together</h2>
+<p class="sub">Sign-in frequency sets the baseline; CAE handles the emergencies.</p>
+
+<p>They're complementary, not either/or. In a Conditional Access policy, under <strong>Session</strong>:</p>
+
+<pre class="code"><span class="muted"># Conditional Access → Session controls</span>
+Sign-in frequency:
+  - Periodic:    e.g. every 8 hours / 1 day  (the routine reauth baseline)
+  - Every time:  for high-risk actions (e.g. accessing the security portal,
+                 role activation) — forces fresh auth each attempt
+Continuous access evaluation:
+  - Enabled (default in most tenants) — leave ON
+  - Strict location enforcement: optional — CAE re-checks IP against
+    CA named-locations mid-session (use with care behind proxies/VPN)</pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Strict location enforcement has a footgun</h3>
+    <p>Enabling strict location enforcement means CAE re-evaluates the client's IP against your named locations mid-session. Behind egress proxies, VPNs, or Secure Web Gateways the perceived IP can shift legitimately, causing unexpected re-auth loops. Roll it out to a pilot group and confirm your egress IPs are in the trusted named-locations list before applying broadly.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">04</span>How to read enforcement</h2>
+<p class="sub">Confirm the token was actually cut, not just re-timed.</p>
+
+<p>After disabling a test account, watch the sign-in logs: a CAE-driven revocation appears as the resource rejecting the token and the client being sent back for re-auth, distinct from a routine sign-in-frequency prompt. The practical test is timing — with CAE working, a disabled user loses access to Exchange/SharePoint/Teams within minutes, not at the next frequency interval. If access persists for the full token lifetime, the client or resource isn't CAE-capable, and you're back to relying on the blunt timer.</p>
+
+<div class="takeaway">
+  <p class="tag">The takeaway</p>
+  <p>Sign-in frequency decides how often you <em>ask</em>; CAE decides how fast you can <em>revoke</em>. Alone, sign-in frequency leaves stolen or orphaned tokens valid until expiry. Leave CAE enabled, pair it with a sensible sign-in-frequency baseline (and "every time" for high-risk actions), and a disabled account loses access in minutes instead of hours. Validate by disabling a test user and timing the cut-off.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-continuous-access-evaluation">Continuous Access Evaluation — Microsoft Learn</a><span>the events and claims-challenge mechanism</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-session-lifetime">Configure sign-in frequency</a><span>the periodic session control</span></li>
+  <li><a href="/posts/token-protection.html">Why a stolen token dies on the wrong laptop</a><span>the token-binding side of session security</span></li>
+</ul>
+</div>
+
+<p class="disclaimer" style="color:var(--ink-3);font-size:13px;margin-top:28px">Anonymized from real configuration work; adapt values to your tenant's licensing and risk posture.</p>
+
+</div>
+</article>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/identity/">Identity</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+</body>
+</html>
