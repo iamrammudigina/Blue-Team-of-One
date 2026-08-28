@@ -7,97 +7,82 @@
 <meta name="description" content="Hands-on defensive security field notes by Ram Mudigina — detection, identity, incident response, and reusable PowerShell for the blue team.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/style.css?v=26">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=27">
 </head>
 <body>
 
 <header class="site-head">
   <div class="site-head-inner">
-    <a class="masthead" href="/">
-      <span class="mark">Blue Team <b>of One</b></span>
-      <span class="tag">field notes · security</span>
-    </a>
-    <nav class="site-nav">
-      <a href="/soc/">SOC</a>
-      <a href="/ir/">IR</a>
-      <a href="/identity/">Identity</a>
-      <a href="/endpoint/">Endpoint</a>
-      <a href="/email/">Email</a>
-      <a href="/detection/">Detection</a>
-      <a href="/cloud/">Cloud</a>
-      <a href="/forensics/">Forensics</a>
-      <a href="/powershell/">PS</a>
-      <a href="/about.html">About</a>
-      <a href="/search.html">Search</a>
-    </nav>
+    <a class="masthead" href="/"><span class="mark">Blue Team <b>of One</b></span></a>
+    <nav class="site-nav"><a href="/soc/">SOC</a><a href="/ir/">IR</a><a href="/identity/">Identity</a><a href="/endpoint/">Endpoint</a><a href="/email/">Email</a><a href="/detection/">Detection</a><a href="/cloud/">Cloud</a><a href="/forensics/">Forensics</a><a href="/powershell/">PS</a></nav>
+    <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
   </div>
 </header>
 
-<section class="eh">
-  <p class="kick">Practitioner security field notes</p>
-  <h1>Real defensive work, written <em>honestly</em>.</h1>
-  <div class="who">
-    <img src="/assets/avatar.webp" alt="Ram Mudigina">
+<section class="hero-home">
+  <div class="hero-grid">
     <div>
-      <div class="nm">Ram Mudigina <span class="v">✓</span></div>
-      <div class="rl">Security Lead · Surya Technologies · Bengaluru, India</div>
+      <div class="hh-eyebrow">practitioner field notes · defensive security</div>
+      <h1>Real defensive work,<br><em>written honestly.</em></h1>
+      <div class="byline-home">
+        <img src="/assets/avatar.webp" alt="Ram Mudigina">
+        <div class="who"><b>Ram Mudigina</b> <span class="vstamp">✓ Verified</span><br>Security Lead · Surya Technologies · Bengaluru</div>
+      </div>
+      <div class="herostats">
+        <div><div class="n">27</div><div class="l">Field notes</div></div>
+        <div><div class="n">09</div><div class="l">Verticals</div></div>
+        <div><div class="n">100%</div><div class="l">From real work</div></div>
+      </div>
     </div>
-  </div>
-  <div class="figures">
-    <div><b>27</b><span>Field notes</span></div>
-    <div><b>09</b><span>Verticals</span></div>
+    <div class="term" aria-hidden="true">
+      <div class="bar"><i></i><i></i><i></i><span>Windows PowerShell — BlueTeam</span></div>
+      <pre id="log"></pre>
+    </div>
   </div>
 </section>
 
-<div class="ecols">
-  <div class="ecol-l">
-    <p class="elbl">Explore by vertical</p>
-      <a class="vrow" href="/identity/"><span class="vnum">01</span>
-        <div class="vmain"><div class="vname">Identity Security</div><div class="vsub">Tokens, Conditional Access, PIM, passwordless.</div></div>
-        <span class="vcount" style="color:var(--t-indigo)">9 <i>posts</i></span><span class="varrow">→</span></a>
-      <a class="vrow" href="/endpoint/"><span class="vnum">02</span>
-        <div class="vmain"><div class="vname">Endpoint Security</div><div class="vsub">EDR, hardening, Intune, LAPS.</div></div>
-        <span class="vcount" style="color:var(--t-cyan)">4 <i>posts</i></span><span class="varrow">→</span></a>
-      <a class="vrow" href="/forensics/"><span class="vnum">03</span>
-        <div class="vmain"><div class="vname">Digital Forensics</div><div class="vsub">Legal holds, eDiscovery, preservation.</div></div>
-        <span class="vcount" style="color:var(--t-rose)">3 <i>posts</i></span><span class="varrow">→</span></a>
-      <a class="vrow" href="/email/"><span class="vnum">04</span>
-        <div class="vmain"><div class="vname">Email Security</div><div class="vsub">Mail flow, phishing, delegation.</div></div>
-        <span class="vcount" style="color:var(--t-sky)">3 <i>posts</i></span><span class="varrow">→</span></a>
-      <a class="vrow" href="/ir/"><span class="vnum">05</span>
-        <div class="vmain"><div class="vname">Incident Response</div><div class="vsub">Containment and honest writeups.</div></div>
-        <span class="vcount" style="color:var(--t-amber)">2 <i>posts</i></span><span class="varrow">→</span></a>
-      <a class="vrow" href="/detection/"><span class="vnum">06</span>
-        <div class="vmain"><div class="vname">Detection Engineering</div><div class="vsub">KQL hunting, Sentinel rules.</div></div>
-        <span class="vcount" style="color:var(--t-teal)">2 <i>posts</i></span><span class="varrow">→</span></a>
-      <a class="vrow" href="/cloud/"><span class="vnum">07</span>
-        <div class="vmain"><div class="vname">Cloud Security</div><div class="vsub">Secure access, posture.</div></div>
-        <span class="vcount" style="color:var(--t-violet)">2 <i>posts</i></span><span class="varrow">→</span></a>
-      <a class="vrow" href="/soc/"><span class="vnum">08</span>
-        <div class="vmain"><div class="vname">SOC Operations</div><div class="vsub">Triage, workflow, automation.</div></div>
-        <span class="vcount" style="color:var(--t-slate)">1 <i>posts</i></span><span class="varrow">→</span></a>
-      <a class="vrow" href="/powershell/"><span class="vnum">09</span>
-        <div class="vmain"><div class="vname">PowerShell Library</div><div class="vsub">Reusable blue-team scripts.</div></div>
-        <span class="vcount" style="color:var(--t-emerald)">1 <i>posts</i></span><span class="varrow">→</span></a>
+<section class="hsection">
+  <div class="cmdhead prompt"><span class="p">PS BlueTeam:\</span><span class="g">&gt;</span> <span class="cmd">Get-Vertical</span> <span class="g">|</span> <span class="cmd">Format-Table</span> <span class="par">-Auto</span><span class="hint">// pick a drawer</span></div>
+  <div class="ps-scroll"><div class="ps-table">
+    <div class="ps-head"><span>Code</span><span>Vertical</span><span>Focus</span><span style="text-align:right">Notes</span></div>
+    <div class="ps-rule"><span>────────</span><span>──────────────────</span><span>──────────────────────────────────────────</span><span>──────</span></div>
+        <a class="ps-row" href="/identity/"><span class="code">IDN</span><span class="name">Identity Security</span><span class="desc">Tokens, Conditional Access, PIM, passwordless</span><span class="n">9</span></a>
+        <a class="ps-row" href="/endpoint/"><span class="code">EDR</span><span class="name">Endpoint Security</span><span class="desc">EDR, hardening, Intune, LAPS</span><span class="n">4</span></a>
+        <a class="ps-row" href="/forensics/"><span class="code">DFIR</span><span class="name">Digital Forensics</span><span class="desc">Legal holds, eDiscovery, preservation</span><span class="n">3</span></a>
+        <a class="ps-row" href="/email/"><span class="code">MAIL</span><span class="name">Email Security</span><span class="desc">Mail flow, phishing, delegation</span><span class="n">3</span></a>
+        <a class="ps-row" href="/ir/"><span class="code">IR</span><span class="name">Incident Response</span><span class="desc">Containment and honest writeups</span><span class="n">2</span></a>
+        <a class="ps-row" href="/detection/"><span class="code">DET</span><span class="name">Detection Engineering</span><span class="desc">KQL hunting, Sentinel rules</span><span class="n">2</span></a>
+        <a class="ps-row" href="/cloud/"><span class="code">CLD</span><span class="name">Cloud Security</span><span class="desc">Secure access, posture</span><span class="n">2</span></a>
+        <a class="ps-row" href="/soc/"><span class="code">SOC</span><span class="name">SOC Operations</span><span class="desc">Triage, workflow, automation</span><span class="n">1</span></a>
+        <a class="ps-row" href="/powershell/"><span class="code">PS</span><span class="name">PowerShell Library</span><span class="desc">Reusable blue-team scripts</span><span class="n">1</span></a>
+  </div></div>
+</section>
+
+<section class="hsection">
+  <div class="cmdhead prompt"><span class="p">PS BlueTeam:\</span><span class="g">&gt;</span> <span class="cmd">Get-FieldNote</span> <span class="par">-Newest</span> <span class="str">4</span><span class="hint">// latest, newest first</span></div>
+  <div class="filed">
+        <a class="filed-row" href="/posts/privileged-access-reporter.html"><span class="filed-id">FN-027 · PS</span><span class="filed-title">A privileged-access reporter: who holds admin, and is it standing or JIT?</span><span class="filed-meta">✓ Aug 2026</span></a>
+        <a class="filed-row" href="/posts/temporary-access-pass-security.html"><span class="filed-id">FN-026 · IDN</span><span class="filed-title">Temporary Access Pass is a loaded gun: using it without shooting yourself</span><span class="filed-meta">✓ Aug 2026</span></a>
+        <a class="filed-row" href="/posts/tiered-pim-privileged-access.html"><span class="filed-id">FN-025 · IDN</span><span class="filed-title">Killing standing admin: tiered privileged access with PIM</span><span class="filed-meta">✓ Aug 2026</span></a>
+        <a class="filed-row" href="/posts/intune-windows-hello.html"><span class="filed-id">FN-024 · EDR</span><span class="filed-title">Windows Hello for Business via Intune: the two paths, and picking the right one</span><span class="filed-meta">✓ Aug 2026</span></a>
   </div>
-  <div class="ecol-r">
-    <p class="elbl">Latest</p>
-    <a class="feat" href="/posts/privileged-access-reporter.html">
-      <div class="ft">PowerShell Library · Aug 21</div>
-      <div class="fh">A privileged-access reporter: who holds admin, and is it standing or JIT?</div>
-      <div class="fm">Newest field note →</div>
-    </a>
-      <a class="mrow" href="/posts/temporary-access-pass-security.html"><span class="mdate">Aug 2026</span><span class="mv">Identity Security</span><div class="mt">Temporary Access Pass is a loaded gun: using it without shooting yourself</div></a>
-      <a class="mrow" href="/posts/tiered-pim-privileged-access.html"><span class="mdate">Aug 2026</span><span class="mv">Identity Security</span><div class="mt">Killing standing admin: tiered privileged access with PIM</div></a>
-      <a class="mrow" href="/posts/intune-windows-hello.html"><span class="mdate">Aug 2026</span><span class="mv">Endpoint Security</span><div class="mt">Windows Hello for Business via Intune: the two paths, and picking the right one</div></a>
-  </div>
-</div>
+</section>
 
 <footer><div class="wrap">
   <span>© 2026 Ram Mudigina · Blue Team of One</span>
-  <span><a href="/about.html">About</a> · <a href="/search.html">Search</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+  <span><a href="/about.html">About</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn ↗</a></span>
 </div></footer>
 
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=27" defer></script>
 </body>
 </html>

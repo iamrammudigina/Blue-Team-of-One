@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/style.css?v=26">
+<link rel="stylesheet" href="/assets/style.css?v=27">
 </head>
 <body>
 
@@ -29,7 +29,7 @@
       <a href="/forensics/">Forensics</a>
       <a href="/powershell/">PS</a>
       <a href="/about.html">About</a>
-      <a href="/search.html">Search</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
     </nav>
   </div>
 </header>
@@ -124,7 +124,7 @@ Get-MailboxPermission -Identity target@contoso.com |
     data-reactions-enabled="1"
     data-emit-metadata="0"
     data-input-position="bottom"
-    data-theme="light"
+    data-theme="dark"
     data-lang="en"
     crossorigin="anonymous"
     async>
@@ -136,5 +136,16 @@ Get-MailboxPermission -Identity target@contoso.com |
   <span><a href="/">Home</a> · <a href="/email/">Email</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
 </div></footer>
 
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=27" defer></script>
 </body>
 </html>
