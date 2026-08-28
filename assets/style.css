@@ -335,3 +335,80 @@ footer a{color:var(--ink-2)} footer a:hover{color:var(--accent)}
   .kbtn{display:none}
 }
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto} .cursor{animation:none}}
+
+/* ---- ATT&CK / severity row: sits in the hero, below the headline ---- */
+.hero .attck{margin:18px 0 4px}
+
+/* ---- Myth vs Reality cards (.mr) ---- */
+.mr{display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin:26px 0}
+.mr-card{border:1px solid var(--line); border-radius:9px; overflow:hidden; background:var(--bg-2)}
+.mr-myth{background:var(--severity-bg); border-bottom:1px solid var(--line)}
+.mr-real{background:var(--verified-bg)}
+.mr-row{display:flex; gap:11px; align-items:flex-start; padding:13px 15px}
+.mr-ico{flex:none; width:16px; height:16px; margin-top:2px}
+.mr-lab{font-family:var(--mono); font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px}
+.mr-myth .mr-lab{color:var(--severity)}
+.mr-real .mr-lab{color:var(--verified)}
+.mr-txt{margin:0; font-size:14.5px; line-height:1.5; color:var(--ink)}
+.mr-txt.dim{color:var(--ink-3)}
+.mr-txt strong{color:var(--ink); font-weight:600}
+.mr-txt .k{font-size:.86em}
+@media(max-width:860px){ .mr{grid-template-columns:1fr} }
+
+/* ---- console callouts (.callout c-syn / c-warn / c-det), for posts that use them ---- */
+.callout{border-radius:8px; padding:15px 18px; margin:26px 0; font-size:15.5px; line-height:1.6; border:1px solid var(--line); background:var(--bg-2)}
+.callout .ttl{font-family:var(--mono); font-size:12px; font-weight:700; display:block; margin-bottom:6px; letter-spacing:.02em}
+.callout p{margin:0; color:var(--ink-2)}
+.c-syn{background:var(--verified-bg); border-color:color-mix(in srgb,var(--verified) 34%,transparent)}
+.c-syn .ttl{color:var(--verified)} .c-syn p{color:var(--ink)}
+.c-warn{background:var(--signal-bg); border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
+.c-warn .ttl{color:var(--accent)}
+.c-det{background:var(--string-bg); border-color:color-mix(in srgb,var(--string) 38%,transparent)}
+.c-det .ttl{color:var(--string)}
+
+/* ============================================================================
+   v29 — CALM READABLE base (default) + console preserved under .zone-console
+   Token-swap: calm becomes default; PS Library keeps the console identity.
+   ============================================================================ */
+:root{
+  --bg:#0f1216; --bg-2:#151a20; --card:#161b22; --card-2:#1c222b;
+  --line:#232a33; --line-2:#2f3742; --line-soft:#1a2028;
+  --ink:#e8ebf0; --ink-2:#aab3c0; --ink-3:#6d7787; --ink-4:#4d5666;
+  --accent:#5ea1ff; --accent-dim:#3d6fb5; --accent-ink:#0a1220;
+  --string:#7fd0c2; --verified:#6fd08c; --severity:#f0868a;
+  --signal-bg:#1b2230; --verified-bg:#122019; --severity-bg:#241a1c; --string-bg:#12201f;
+  --sans:"Inter",system-ui,-apple-system,sans-serif;
+  --serif:"Newsreader",Georgia,serif;
+  --head:var(--serif);
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+/* calm reading: quiet background, readable body */
+body{background-image:none;font-family:var(--sans);letter-spacing:-.003em}
+/* headline elements → serif; keep mono for code/labels/nav */
+.masthead,.masthead .mark{font-family:var(--sans);font-weight:650;letter-spacing:-.01em}
+.masthead .mark:before{content:""!important}
+.masthead .mark b{color:var(--accent)}
+.hero h1,.phead h1,.prow h3,.scard h3,.tile h2,.comments-head h2,.filed-title{font-family:var(--head);font-weight:500;letter-spacing:-.015em}
+.head{font-family:var(--sans);font-weight:680;letter-spacing:-.01em}
+.hero h1 em,.head em{font-style:italic;color:var(--accent)}
+/* article readability */
+.wrap p,.lede{font-size:18px}
+article,.wrap{line-height:1.75}
+.site-nav a[aria-current="page"]{color:var(--accent)}
+.k{background:var(--card-2);border-color:var(--line)}
+
+/* ---- CONSOLE ZONE: PowerShell Library keeps the terminal identity ---- */
+body.zone-console{
+  --bg:#071733; --bg-2:#0A1E42; --card:#0C244C; --card-2:#103063;
+  --line:#1E3E70; --line-2:#2a4f86; --line-soft:#132A54;
+  --ink:#EAEEF6; --ink-2:#B7C4DD; --ink-3:#7C8DB3; --ink-4:#4C6193;
+  --accent:#F2D45C; --accent-dim:#B79A2E; --accent-ink:#071733;
+  --string:#5AC8DA; --verified:#6FD08C; --severity:#F76F72;
+  --signal-bg:#241F0C; --verified-bg:#0C2417; --severity-bg:#26131A; --string-bg:#0A2733;
+  --head:var(--mono);
+  background-image:linear-gradient(var(--line-soft) 1px,transparent 1px),linear-gradient(90deg,var(--line-soft) 1px,transparent 1px);
+  background-size:100px 100px;background-attachment:fixed;
+}
+body.zone-console .masthead,body.zone-console .masthead .mark{font-family:var(--mono);font-weight:700}
+body.zone-console .masthead .mark:before{content:"PS BlueTeam:\\> "!important;color:var(--verified);font-weight:400}
+body.zone-console .hero h1,body.zone-console .phead h1,body.zone-console .prow h3,body.zone-console .scard h3,body.zone-console .tile h2,body.zone-console .head{font-family:var(--mono)}

@@ -7,8 +7,8 @@
 <meta name="description" content="A 'verify you're human' page that tells the user to paste a command into the Run box. The endpoint cleanup is the easy half — the RunMRU registry key that records exactly what they pasted is the forensic gold, and the identity often lives in more than one tenant.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/style.css?v=27">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=29">
 </head>
 <body>
 
@@ -31,7 +31,6 @@
       <a href="/about.html">About</a>
       <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
     </nav>
-      <div class="attck"><span class="sev sev-high">SEVERITY: High</span><span class="ttp"><b>T1204</b> User Execution</span><span class="ttp"><b>T1059</b> Command & Scripting</span></div>
 </div>
 </header>
 
@@ -40,6 +39,7 @@
     <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/endpoint/">Endpoint Security</a><span class="sep">›</span><a href="/endpoint/threats.html">Threats &amp; remediation</a></p>
     <p class="eyebrow"><span class="dot"></span>Endpoint · IR</p>
     <h1>ClickFix: the attack that <em>makes the victim run the malware</em></h1>
+    <div class="attck"><span class="sev sev-high">SEVERITY: High</span><span class="ttp"><b>T1204</b> User Execution</span><span class="ttp"><b>T1059</b> Command & Scripting</span></div>
     <p class="lede">A "verify you're human" page that quietly tells the user to paste a command into the Windows Run box. The endpoint cleanup is the easy half — the registry key that records exactly what they pasted is the forensic gold most people never check, and the identity usually lives in more than one place.</p>
     <div class="byline">
       <span><b>Ram Mudigina</b></span>
@@ -205,6 +205,6 @@ reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU"</pre>
   </div>
 </div>
 <div class="progress" id="progress"></div>
-<script src="/assets/blueteam.js?v=27" defer></script>
+<script src="/assets/blueteam.js?v=29" defer></script>
 </body>
 </html>

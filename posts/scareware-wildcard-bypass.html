@@ -7,8 +7,8 @@
 <meta name="description" content="A fake virus pop-up hosted on Azure Blob Storage sailed straight past the web proxy. The scam wasn't the interesting part — the wildcard allow-rule that let it through was. Why *.windows.net in a bypass category is a hole attackers rent.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/style.css?v=27">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=29">
 </head>
 <body>
 
@@ -31,7 +31,6 @@
       <a href="/about.html">About</a>
       <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
     </nav>
-      <div class="attck"><span class="sev sev-med">SEVERITY: Medium</span><span class="ttp"><b>T1566</b> Phishing</span><span class="ttp"><b>T1204</b> User Execution</span></div>
 </div>
 </header>
 
@@ -40,6 +39,7 @@
     <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/ir/">IR</a><span class="sep">›</span><a href="/ir/scams.html">Scams &amp; social engineering</a></p>
     <p class="eyebrow"><span class="dot"></span>Incident response · web filtering</p>
     <h1>The scareware that <em>walked through your allow-list</em></h1>
+    <div class="attck"><span class="sev sev-med">SEVERITY: Medium</span><span class="ttp"><b>T1566</b> Phishing</span><span class="ttp"><b>T1204</b> User Execution</span></div>
     <p class="lede">A user hit a full-screen "virus alert" with a fake support number. Textbook scareware — except it was hosted on a Microsoft cloud domain, and the corporate web proxy waved it straight through. The scam wasn't the story. The wildcard allow-rule that let it in was.</p>
     <div class="byline">
       <span><b>Ram Mudigina</b></span>
@@ -212,6 +212,6 @@
   </div>
 </div>
 <div class="progress" id="progress"></div>
-<script src="/assets/blueteam.js?v=27" defer></script>
+<script src="/assets/blueteam.js?v=29" defer></script>
 </body>
 </html>

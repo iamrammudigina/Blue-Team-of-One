@@ -7,8 +7,8 @@
 <meta name="description" content="A phishing wave that arrived from a genuine, trusted client mailbox — so it passed every authentication check — then laundered its reputation through a legitimate SaaS host on the way to a fake Microsoft login. Why sender trust isn't email trust, and how to scope and purge the blast.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/style.css?v=27">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=29">
 </head>
 <body>
 
@@ -31,7 +31,6 @@
       <a href="/about.html">About</a>
       <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
     </nav>
-      <div class="attck"><span class="sev sev-med">SEVERITY: Medium</span><span class="ttp"><b>T1566.002</b> Spearphishing Link</span><span class="ttp"><b>T1534</b> Internal Spearphishing</span></div>
 </div>
 </header>
 
@@ -40,6 +39,7 @@
     <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/email/">Email Security</a><span class="sep">›</span><a href="/email/inbound.html">Inbound security</a></p>
     <p class="eyebrow"><span class="dot"></span>Inbound security · phishing</p>
     <h1>When the sender is real <em>and the email still isn't</em></h1>
+    <div class="attck"><span class="sev sev-med">SEVERITY: Medium</span><span class="ttp"><b>T1566.002</b> Spearphishing Link</span><span class="ttp"><b>T1534</b> Internal Spearphishing</span></div>
     <p class="lede">A phishing wave that arrived from a genuine, trusted client mailbox — so it passed every authentication check — then laundered its reputation through a legitimate SaaS host on the way to a fake Microsoft login. Sender trust is not email trust, and this is why.</p>
     <div class="byline">
       <span><b>Ram Mudigina</b></span>
@@ -191,6 +191,6 @@ New-ComplianceSearchAction -SearchName "Phish-Purge" -Purge -PurgeType HardDelet
   </div>
 </div>
 <div class="progress" id="progress"></div>
-<script src="/assets/blueteam.js?v=27" defer></script>
+<script src="/assets/blueteam.js?v=29" defer></script>
 </body>
 </html>

@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Runbook · Exchange mailbox holds &amp; lifecycle — Blue Team of One</title>
+<meta name="description" content="A guided, step-by-step PowerShell runbook for Exchange Online mailbox holds and lifecycle — triage state, decode every hold, remove litigation/retention holds safely, clean Recoverable Items, recover inactive mailboxes, and permanently delete. Commands fill from the mailbox you enter.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;680&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=29">
+<style>
+/* runbook wizard — scoped, console-zone */
+.rb-head{padding:44px 0 26px;border-bottom:1px solid var(--line)}
+.rb-eyebrow{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;margin-bottom:14px}
+.rb-title{font-family:var(--mono);font-weight:700;font-size:clamp(26px,4vw,40px);line-height:1.1;margin:0;color:var(--ink);letter-spacing:-.01em}
+.rb-title em{font-style:normal;color:var(--accent)}
+.rb-sub{color:var(--ink-2);font-size:17px;margin:16px 0 0;max-width:64ch}
+.rb-wrap{max-width:860px;margin:0 auto;padding:0 32px}
+.setup{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:16px 18px;margin:26px 0 8px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.setup label{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:6px}
+.setup input{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:7px;color:var(--ink);font-family:var(--mono);font-size:13px;padding:10px 12px;outline:none}
+.setup input:focus{border-color:var(--accent-dim)}
+.setup .warn{grid-column:1/-1;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.setup .warn b{color:var(--accent)}
+.trail{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-family:var(--mono);font-size:11.5px;margin:22px 0 18px}
+.trail .cr{color:var(--verified);background:var(--verified-bg);border:1px solid color-mix(in srgb,var(--verified) 34%,transparent);border-radius:5px;padding:3px 9px;cursor:pointer}
+.trail .cr:hover{color:var(--ink)} .trail .aw{color:var(--ink-4)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:26px}
+.card.done{border-color:color-mix(in srgb,var(--verified) 38%,transparent)}
+.card.danger{border-color:color-mix(in srgb,var(--severity) 40%,transparent)}
+.step-n{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase}
+.card.danger .step-n{color:var(--severity)}
+.q{font-family:var(--mono);font-size:20px;font-weight:700;margin:8px 0 6px;line-height:1.3}
+.qh{color:var(--ink-2);font-size:14.5px;margin-bottom:18px;line-height:1.55}
+.qh code{font-family:var(--mono);font-size:.9em;color:var(--string)}
+.opts{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.opt{display:flex;align-items:center;gap:13px;background:var(--bg-2);border:1px solid var(--line);border-radius:9px;padding:14px 16px;cursor:pointer;transition:.15s;text-align:left;color:inherit;font:inherit;width:100%}
+.opt:hover{border-color:var(--accent-dim);background:var(--card-2);transform:translateX(3px)}
+.opt .kb{font-family:var(--mono);font-size:12px;color:var(--accent);border:1px solid var(--line);border-radius:5px;padding:2px 8px;min-width:26px;text-align:center;flex:none}
+.opt .ot{font-size:15px} .opt .od{color:var(--ink-3);font-size:12.5px;font-family:var(--mono);display:block;margin-top:2px}
+.cmd-block{background:var(--bg-2);border:1px solid var(--line);border-radius:9px;overflow:hidden;margin:14px 0}
+.cmd-block .ch{display:flex;justify-content:space-between;align-items:center;padding:8px 13px;border-bottom:1px solid var(--line);background:var(--card-2)}
+.cmd-block .fn{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.copy{font-family:var(--mono);font-size:11px;color:var(--ink-3);background:transparent;border:1px solid var(--line);border-radius:5px;padding:4px 9px;cursor:pointer;transition:.15s}
+.copy:hover{color:var(--ink);border-color:var(--accent-dim)} .copy.done{color:var(--verified);border-color:color-mix(in srgb,var(--verified) 45%,transparent)}
+.cmd-block pre{margin:0;padding:13px 15px;font-family:var(--mono);font-size:13px;line-height:1.75;color:var(--ink-2);overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+.cmd-block .ck{color:var(--accent)} .cmd-block .cs{color:var(--string)} .cmd-block .cv{color:var(--verified)} .cmd-block .cp{color:var(--ink-2)} .cmd-block .cm{color:color-mix(in srgb,var(--verified) 58%,var(--ink-3))} .cmd-block .fill{color:var(--string);font-weight:600}
+.note{font-size:14.5px;color:var(--ink-2);margin:6px 0 2px;line-height:1.55}
+.gate{display:flex;gap:11px;background:var(--severity-bg);border:1px solid color-mix(in srgb,var(--severity) 34%,transparent);border-radius:9px;padding:13px 15px;margin:14px 0}
+.gate .gi{color:var(--severity);flex:none;font-family:var(--mono);font-weight:700}
+.gate p{margin:0;font-size:14px;color:var(--ink)}
+.restart{font-family:var(--mono);font-size:12px;color:var(--ink-3);background:transparent;border:1px solid var(--line);border-radius:6px;padding:8px 14px;cursor:pointer;margin-top:18px}
+.restart:hover{color:var(--ink);border-color:var(--accent-dim)}
+.draft{font-family:var(--mono);font-size:11px;color:var(--accent);border:1px solid var(--accent-dim);background:var(--signal-bg);border-radius:6px;padding:4px 10px;display:inline-block;margin-top:20px}
+@media(max-width:640px){.setup{grid-template-columns:1fr}}
+</style>
+</head>
+<body class="zone-console">
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/"><span class="mark">Blue Team <b>of One</b></span><span class="tag">field notes · security</span></a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a><a href="/ir/">IR</a><a href="/identity/">Identity</a><a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a><a href="/detection/">Detection</a><a href="/cloud/">Cloud</a><a href="/forensics/">Forensics</a>
+      <a href="/powershell/" aria-current="page">PS</a><a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<div class="progress" id="progress"></div>
+
+<header class="rb-head"><div class="rb-wrap">
+  <p class="rb-eyebrow">Guided runbook · PowerShell Library</p>
+  <h1 class="rb-title">Exchange mailbox <em>holds &amp; lifecycle</em></h1>
+  <p class="rb-sub">Answer each step — it triages the mailbox, decodes every hold, and hands you the exact command for your case. Enter the mailbox once and every command fills in.</p>
+</div></header>
+
+<main><div class="rb-wrap">
+  <div class="setup">
+    <div><label>Target mailbox (UPN)</label><input id="upn" value="user@contoso.com" oninput="refill()"></div>
+    <div><label>Mailbox GUID (optional — fallback identity)</label><input id="guid" value="00000000-0000-0000-0000-000000000000" oninput="refill()"></div>
+    <p class="warn"><b>Read-only until you approve.</b> Every destructive step is gated. Enter the values above once — they replace <code>@UPN</code>/<code>@GUID</code> in every command below.</p>
+  </div>
+
+  <div class="trail" id="trail"></div>
+  <div id="stage"></div>
+
+  <span class="draft">DRAFT · commands sanitized from real runbooks — validate against your tenant before running</span>
+</div></main>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/powershell/">PowerShell Library</a> · <a href="/about.html">About</a></span>
+</div></footer>
+
+<div class="pal-back" id="palBack"><div class="pal-dialog" role="dialog" aria-label="Search">
+  <div class="pal-top"><span class="ps">PS&gt;</span><input id="palInput" placeholder="Get-FieldNote -Match …" autocomplete="off"></div>
+  <div class="pal-list" id="palList"></div>
+  <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+</div></div>
+
+<script>
+/* ---- FLOW (data-driven; sanitized from SOPs) ---- */
+const FLOW = {
+  start:{ n:"Step 0 · connect", q:"Connect your sessions", h:"Exchange Online for mailbox properties; Security &amp; Compliance only if you later find hold GUIDs to decode.",
+    cmds:[
+      {f:"Exchange Online", c:`<span class="ck">Connect-ExchangeOnline</span> <span class="cp">-UserPrincipalName</span> <span class="cs">you@contoso.com</span>`},
+      {f:"Security & Compliance (for hold decode)", c:`<span class="ck">Connect-IPPSSession</span> <span class="cp">-UserPrincipalName</span> <span class="cs">you@contoso.com</span>`},
+      {f:"verify", c:`<span class="ck">Get-ConnectionInformation</span> <span class="cp">|</span> <span class="ck">ft</span> Name,State,ConnectionUri`}
+    ],
+    opts:[{k:"→",t:"Connected — start triage",next:"state"}] },
+
+  state:{ n:"Step 1 · locate", q:"Where does the mailbox live right now?", h:"This decides every command downstream. Not sure? Run all three; whichever returns a result is your branch.",
+    cmds:[
+      {f:"active?", c:`<span class="ck">Get-Mailbox</span> <span class="fill">@UPN</span>`},
+      {f:"soft-deleted? (deleted <30 days)", c:`<span class="ck">Get-Mailbox</span> <span class="cp">-SoftDeletedMailbox</span> <span class="fill">@UPN</span> <span class="cp">|</span> <span class="ck">select</span> Name,WhenSoftDeleted,ExternalDirectoryObjectId`},
+      {f:"inactive? (held after offboarding)", c:`<span class="ck">Get-Mailbox</span> <span class="cp">-InactiveMailboxOnly</span> <span class="fill">@UPN</span> <span class="cp">|</span> <span class="ck">select</span> Name,ExternalDirectoryObjectId`}
+    ],
+    opts:[
+      {k:"A",t:"Active mailbox",d:"licensed, normal user",next:"holds"},
+      {k:"B",t:"Soft-deleted",d:"recently deleted, recoverable",next:"holds"},
+      {k:"C",t:"Inactive",d:"held after offboarding",next:"holds"}
+    ] },
+
+  holds:{ n:"Step 2 · hold analysis", q:"Decode every hold on the mailbox", h:"One command shows all hold types. A user asking to 'remove the litigation hold' is often wrong — there may be no litigation hold at all, just a retention or residual hold.",
+    cmds:[
+      {f:"all hold flags at once", c:`<span class="ck">Get-Mailbox</span> <span class="fill">@UPN</span> <span class="cp">|</span> <span class="ck">fl</span> <span class="cp">*Hold*</span>,LitigationHoldDate,RetentionPolicy`},
+      {f:"just the InPlace/Purview GUIDs", c:`<span class="ck">Get-Mailbox</span> <span class="fill">@UPN</span> <span class="cp">|</span> <span class="ck">fl</span> InPlaceHolds`}
+    ],
+    note:"Read: LitigationHoldEnabled · InPlaceHolds · RetentionHoldEnabled · ComplianceTagHoldApplied · DelayHoldApplied · DelayReleaseHoldApplied.",
+    opts:[
+      {k:"A",t:"InPlaceHolds shows a GUID",d:"Purview / eDiscovery / retention",next:"decode"},
+      {k:"B",t:"Only LitigationHoldEnabled = True",d:"classic litigation hold",next:"litremove"},
+      {k:"C",t:"No holds at all (all False / {})",d:"safe to clean up",next:"whatnext"},
+      {k:"D",t:"Only Delay/Residual hold left",d:"cleanup blocked by backend",next:"recover_items"}
+    ] },
+
+  decode:{ n:"Step 2a · decode GUID", q:"Decode the InPlace hold before touching anything", h:"A GUID in InPlaceHolds is a Purview/eDiscovery or retention-policy hold. It must be removed <em>in Purview</em> first — you cannot clear it from Exchange. This is a hard stop for legal approval.",
+    cmds:[
+      {f:"eDiscovery case holds referencing this mailbox", c:`<span class="ck">Get-CaseHoldPolicy</span> <span class="cp">|</span> <span class="cp">?</span> { <span class="cv">$_</span>.ExchangeLocation <span class="cp">-match</span> <span class="cs">"@UPN"</span> } <span class="cp">|</span> <span class="ck">fl</span> Name,CaseId,Enabled`},
+      {f:"the matching rule", c:`<span class="ck">Get-CaseHoldRule</span> <span class="cp">|</span> <span class="ck">fl</span> Name,Policy,Disabled`}
+    ],
+    gate:"Active case/eDiscovery hold = out of scope here. Follow the Legal-Hold Release process with written Legal approval before removing anything.",
+    opts:[{k:"↺",t:"Legal approved removal in Purview → re-check holds",next:"holds"}] },
+
+  whatnext:{ n:"Step 3 · goal", q:"No blocking holds. What are you here to do?", h:"Pick the outcome — the runbook branches to the right procedure.",
+    opts:[
+      {k:"A",t:"Relieve mailbox size / quota",d:"legacy 10 GB → 100 GB",next:"quota"},
+      {k:"B",t:"Clean up Recoverable Items bloat",d:"Microsoft-guided cleanup",next:"recover_items"},
+      {k:"C",t:"Remove a litigation hold",d:"for cleanup or deletion",next:"litremove"},
+      {k:"D",t:"Recover an inactive mailbox",d:"restore original data",next:"recover_mbx"},
+      {k:"E",t:"Permanently delete",d:"irreversible",next:"harddelete"},
+      {k:"F",t:"Just audit holds tenant-wide",d:"reporting",next:"audit"}
+    ] },
+
+  quota:{ n:"Step 3 · quota", q:"Raise the mailbox quota", h:"Legacy E5 mailboxes can sit at a 10 GB default. Check current quotas, then lift to the 100 GB ceiling.",
+    cmds:[
+      {f:"check current quotas", c:`<span class="ck">Get-Mailbox</span> <span class="fill">@UPN</span> <span class="cp">|</span> <span class="ck">fl</span> ProhibitSendQuota,ProhibitSendReceiveQuota,IssueWarningQuota,UseDatabaseQuotaDefaults`},
+      {f:"raise to ceiling", c:`<span class="ck">Set-Mailbox</span> <span class="fill">@UPN</span> \`\n  <span class="cp">-UseDatabaseQuotaDefaults</span> <span class="cv">$false</span> \`\n  <span class="cp">-IssueWarningQuota</span> <span class="cs">98GB</span> <span class="cp">-ProhibitSendQuota</span> <span class="cs">99GB</span> <span class="cp">-ProhibitSendReceiveQuota</span> <span class="cs">100GB</span>`}
+    ],
+    result:true, note:"Quota lifted. Confirm the send/receive limits with the first command again. Done.", opts:[] },
+
+  recover_items:{ n:"Step 3 · recoverable items", q:"Microsoft-guided Recoverable Items cleanup", h:"For bloat that retention isn't ageing out. Temporarily relax retention, force the Managed Folder Assistant, then <strong>restore</strong> the settings afterwards.",
+    cmds:[
+      {f:"1 · check recovery/retention state", c:`<span class="ck">Get-Mailbox</span> <span class="fill">@UPN</span> <span class="cp">|</span> <span class="ck">fl</span> SingleItemRecoveryEnabled,RetainDeletedItemsFor`},
+      {f:"2 · relax (temporary)", c:`<span class="ck">Set-Mailbox</span> <span class="fill">@UPN</span> <span class="cp">-SingleItemRecoveryEnabled</span> <span class="cv">$false</span>\n<span class="ck">Set-Mailbox</span> <span class="fill">@UPN</span> <span class="cp">-RetainDeletedItemsFor</span> <span class="cs">0</span>`},
+      {f:"3 · drop residual delay holds", c:`<span class="ck">Set-Mailbox</span> <span class="fill">@UPN</span> <span class="cp">-RemoveDelayHoldApplied</span>\n<span class="ck">Set-Mailbox</span> <span class="fill">@UPN</span> <span class="cp">-RemoveDelayReleaseHoldApplied</span>`},
+      {f:"4 · force cleanup", c:`<span class="ck">Start-ManagedFolderAssistant</span> <span class="cp">-Identity</span> <span class="fill">@UPN</span> <span class="cp">-FullCrawl -HoldCleanup</span>`},
+      {f:"5 · verify recoverable items", c:`<span class="ck">Get-MailboxFolderStatistics</span> <span class="cp">-Identity</span> <span class="fill">@UPN</span> <span class="cp">-FolderScope</span> RecoverableItems <span class="cp">|</span> <span class="ck">ft</span> Name,FolderAndSubfolderSize,ItemsInFolderAndSubfolders <span class="cp">-Auto</span>`}
+    ],
+    note:"Cleanup is asynchronous — allow time, then re-check step 5.",
+    opts:[{k:"A",t:"Cleared → restore retention settings",next:"restore_ret"}] },
+
+  restore_ret:{ n:"Step 4 · restore", q:"Put retention back", h:"Never leave a mailbox with recovery disabled. Restore the safe defaults once cleanup has settled.",
+    cmds:[{f:"restore protection", c:`<span class="ck">Set-Mailbox</span> <span class="fill">@UPN</span> <span class="cp">-SingleItemRecoveryEnabled</span> <span class="cv">$true</span>\n<span class="ck">Set-Mailbox</span> <span class="fill">@UPN</span> <span class="cp">-RetainDeletedItemsFor</span> <span class="cs">14</span>`}],
+    result:true, note:"Retention restored. Validate mailbox behaviour (send/cancel a calendar invite). Done.", opts:[] },
+
+  litremove:{ n:"Step 3 · hold removal", q:"Remove the litigation hold", h:"Only after written Legal approval. Use <code>-InactiveMailbox</code> for inactive; fall back to the GUID if the UPN doesn't resolve.",
+    gate:"Confirm written Legal / Security &amp; Governance approval is recorded on the ticket BEFORE running this.",
+    cmds:[
+      {f:"remove (inactive mailbox)", c:`<span class="ck">Set-Mailbox</span> <span class="cp">-InactiveMailbox</span> <span class="fill">@UPN</span> <span class="cp">-LitigationHoldEnabled</span> <span class="cv">$false</span>`},
+      {f:"…or by GUID if identity fails", c:`<span class="ck">Set-Mailbox</span> <span class="fill">@GUID</span> <span class="cp">-LitigationHoldEnabled</span> <span class="cv">$false</span>`},
+      {f:"validate", c:`<span class="ck">Get-Mailbox</span> <span class="cp">-SoftDeletedMailbox</span> <span class="fill">@UPN</span> <span class="cp">|</span> <span class="ck">fl</span> LitigationHoldEnabled`}
+    ],
+    note:"LitigationHoldEnabled : False confirms removal.",
+    opts:[
+      {k:"A",t:"Removed — now permanently delete",next:"harddelete"},
+      {k:"B",t:"Removed — that's all I needed",next:"end_ok"}
+    ] },
+
+  harddelete:{ n:"Step 4 · permanent delete", q:"Permanently delete the soft-deleted mailbox", h:"Irreversible. If it fails with “at least one type of hold or hold policy applied” even though holds look clear, a residual retention policy is still enforcing — override once with <code>-ExcludeFromAllHolds</code>.", danger:true,
+    gate:"IRREVERSIBLE. Written approval + a change record must exist. There is no undo.",
+    cmds:[
+      {f:"attempt permanent delete", c:`<span class="ck">Remove-Mailbox</span> <span class="cp">-Identity</span> <span class="fill">@GUID</span> <span class="cp">-PermanentlyDelete</span>`},
+      {f:"if it fails → clear residual hold", c:`<span class="ck">Set-Mailbox</span> <span class="cp">-Identity</span> <span class="fill">@GUID</span> <span class="cp">-ExcludeFromAllHolds</span>`},
+      {f:"wait for propagation, confirm empty", c:`<span class="ck">Get-EXOMailbox</span> <span class="cp">-SoftDeletedMailbox</span> <span class="fill">@UPN</span> <span class="cp">|</span> <span class="ck">select</span> DisplayName,InPlaceHolds`},
+      {f:"retry delete", c:`<span class="ck">Remove-Mailbox</span> <span class="cp">-Identity</span> <span class="fill">@GUID</span> <span class="cp">-PermanentlyDelete</span>`}
+    ],
+    result:true, note:"When it no longer appears under -SoftDeletedMailbox, deletion is complete.", opts:[] },
+
+  recover_mbx:{ n:"Step 3 · recover", q:"Recover the inactive mailbox", h:"Recreate an active mailbox from the inactive copy using its GUID — original data and ExchangeGuid are preserved.",
+    cmds:[
+      {f:"1 · check for a conflicting new mailbox", c:`<span class="ck">Get-Mailbox</span> <span class="cp">-Identity</span> <span class="fill">@UPN</span> <span class="cp">-ErrorAction</span> SilentlyContinue`},
+      {f:"2 · if one exists, remove it first", c:`<span class="ck">Remove-Mailbox</span> <span class="cp">-Identity</span> <span class="fill">@UPN</span>`},
+      {f:"3 · restore from the inactive mailbox", c:`<span class="ck">New-Mailbox</span> <span class="cp">-InactiveMailbox</span> <span class="fill">@GUID</span> \`\n  <span class="cp">-Name</span> <span class="cs">"Restored Mailbox"</span> <span class="cp">-MicrosoftOnlineServicesID</span> <span class="fill">@UPN</span>`},
+      {f:"4 · verify restore + hold status", c:`<span class="ck">Get-Mailbox</span> <span class="cp">-Identity</span> <span class="fill">@UPN</span> <span class="cp">|</span> <span class="ck">select</span> DisplayName,ExchangeGuid,LitigationHoldEnabled`}
+    ],
+    result:true, note:"ExchangeGuid matching the original confirms the data came back. Litigation hold usually does not persist through restore — re-check and re-apply if policy requires. Done.", opts:[] },
+
+  audit:{ n:"Step 3 · audit", q:"Tenant-wide hold audits", h:"Reporting only — read-only enumeration across all mailboxes, including inactive.",
+    cmds:[
+      {f:"all inactive mailboxes", c:`<span class="ck">Get-Mailbox</span> <span class="cp">-InactiveMailboxOnly -ResultSize</span> Unlimited <span class="cp">|</span> <span class="ck">select</span> DisplayName,UserPrincipalName`},
+      {f:"everyone on litigation hold", c:`<span class="ck">Get-Mailbox</span> <span class="cp">-ResultSize</span> Unlimited <span class="cp">|</span> <span class="cp">?</span> {<span class="cv">$_</span>.LitigationHoldEnabled} <span class="cp">|</span> <span class="ck">select</span> Name,UserPrincipalName,LitigationHoldDate`},
+      {f:"case-hold policies", c:`<span class="ck">Get-CaseHoldPolicy</span>\n<span class="ck">Get-CaseHoldRule</span>`},
+      {f:"or export everything with the script ↓", c:`<span class="ck">.\\Get-MailboxHoldsReport.ps1</span>`}
+    ],
+    result:true, note:"For a full CSV across every hold type, use the downloadable script below.", opts:[] },
+
+  end_ok:{ n:"Done", q:"Hold removed — nothing further", h:"Record the command output verbatim in the ticket work notes. Done.", result:true, opts:[] }
+};
+
+let path=[];
+function val(id,fb){const v=(document.getElementById(id)?.value||'').trim();return v||fb;}
+function fillVars(html){
+  const upn=val('upn','@UPN'), guid=val('guid','@GUID');
+  return html.replaceAll('@UPN',`<span class="fill">${upn}</span>`).replaceAll('@GUID',`<span class="fill">${guid}</span>`);
+}
+function refill(){render();}
+function copyText(el){const raw=el.closest('.cmd-block').querySelector('pre').innerText;navigator.clipboard&&navigator.clipboard.writeText(raw);el.textContent="✓ Copied";el.classList.add('done');setTimeout(()=>{el.textContent="Copy";el.classList.remove('done');},1300);}
+function go(next){path.push(next);render();window.scrollTo({top:0,behavior:'smooth'});}
+function jump(i){path=path.slice(0,i);render();}
+function render(){
+  const tr=document.getElementById('trail');
+  tr.innerHTML='<span class="cr" onclick="jump(0)">connect</span>';
+  path.forEach((id,i)=>{tr.innerHTML+='<span class="aw">→</span><span class="cr" onclick="jump('+(i+1)+')">'+((FLOW[id]?.n||id).split('·').pop().trim())+'</span>';});
+  const node = path.length? FLOW[path[path.length-1]] : FLOW.start;
+  const s=document.getElementById('stage');
+  let h='<div class="card'+(node.result?' done':'')+(node.danger?' danger':'')+'">';
+  h+='<div class="step-n">'+node.n+(node.result?' · complete':'')+'</div><div class="q">'+node.q+'</div>';
+  if(node.h) h+='<div class="qh">'+node.h+'</div>';
+  if(node.gate) h+='<div class="gate"><span class="gi">⚠ GATE</span><p>'+node.gate+'</p></div>';
+  if(node.cmds) node.cmds.forEach(cm=>{h+='<div class="cmd-block"><div class="ch"><span class="fn"># '+cm.f+'</span><button class="copy" onclick="copyText(this)">Copy</button></div><pre>'+fillVars(cm.c)+'</pre></div>';});
+  if(node.note) h+='<p class="note">▸ '+node.note+'</p>';
+  if(node.opts&&node.opts.length){h+='<div class="opts">';node.opts.forEach(o=>{h+='<button class="opt" onclick="go(\''+o.next+'\')"><span class="kb">'+o.k+'</span><span><span class="ot">'+o.t+'</span>'+(o.d?'<span class="od">'+o.d+'</span>':'')+'</span></button>';});h+='</div>';}
+  if(node.result) h+='<button class="restart" onclick="jump(0)">↻ start over</button>';
+  h+='</div>';
+  s.innerHTML=h;
+}
+render();
+</script>
+<script src="/assets/blueteam.js?v=29"></script>
+</body>
+</html>

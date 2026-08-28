@@ -7,8 +7,8 @@
 <meta name="description" content="A Temporary Access Pass isn't an MFA bypass — it's a strong credential that can bootstrap persistent access, which is exactly why it's dangerous. The real risks, and the tight policy, scoping, and Conditional Access controls that keep TAP from becoming your weakest link.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/style.css?v=27">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=29">
 </head>
 <body>
 
@@ -31,7 +31,6 @@
       <a href="/about.html">About</a>
       <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
     </nav>
-      <div class="attck"><span class="sev sev-high">SEVERITY: High</span><span class="ttp"><b>T1078</b> Valid Accounts</span><span class="ttp"><b>T1556</b> Modify Auth Process</span><span class="ttp"><b>T1098</b> Account Manipulation</span></div>
 </div>
 </header>
 
@@ -40,6 +39,7 @@
     <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/identity/">Identity Security</a><span class="sep">›</span><a href="/identity/auth-mfa.html">Authentication &amp; MFA</a></p>
     <p class="eyebrow"><span class="dot"></span>Authentication · risk &amp; mitigation</p>
     <h1>Temporary Access Pass is a loaded gun: <em>using it without shooting yourself</em></h1>
+    <div class="attck"><span class="sev sev-high">SEVERITY: High</span><span class="ttp"><b>T1078</b> Valid Accounts</span><span class="ttp"><b>T1556</b> Modify Auth Process</span><span class="ttp"><b>T1098</b> Account Manipulation</span></div>
     <p class="lede">People call TAP an "MFA bypass." It isn't — and that misunderstanding is exactly what makes it dangerous, because teams either ban it or wave it through without controls. A TAP is a strong credential that can <strong>bootstrap other credentials</strong>. Issued carelessly, it's a clean path to persistent access on any account it touches. Here's the real risk model, and how to configure it so it doesn't become your softest target.</p>
     <div class="byline">
       <span><b>Ram Mudigina</b></span>
@@ -218,6 +218,6 @@ Normal sign-in strength       → EXCLUDES TAP; requires phishing-resistant
   </div>
 </div>
 <div class="progress" id="progress"></div>
-<script src="/assets/blueteam.js?v=27" defer></script>
+<script src="/assets/blueteam.js?v=29" defer></script>
 </body>
 </html>
