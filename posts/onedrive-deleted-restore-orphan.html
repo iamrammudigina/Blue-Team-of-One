@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The OneDrive that comes back — then leaves again — Blue Team of One</title>
+<meta name="description" content="A departed user's OneDrive returns a 404. That doesn't mean it's gone. It's sitting in the deleted-site bin — and restoring it is only half the job, because a restored personal site with no owner is an orphan the tenant will delete again on a 30-day clock.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=29">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/" aria-current="page">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/forensics/">Digital Forensics</a><span class="sep">›</span><a href="/forensics/onedrive-preservation.html">OneDrive &amp; SharePoint preservation</a></p>
+    <p class="eyebrow"><span class="dot"></span>Deep dive · Deleted OneDrive</p>
+    <h1>The OneDrive that comes back — <em>then leaves again</em></h1>
+    <p class="lede">A departed user's OneDrive returns a bare <span class="k">404 FILE NOT FOUND</span>. That page tells you almost nothing about whether the data still exists. It's usually sitting in the deleted-site bin, fully recoverable — but restoring it is only half the job, because a personal site whose owner has been deleted is an <em>orphan</em>, and the tenant will quietly delete it again on a 30-day clock. Here's the full round trip, and the offboarding fix that stops the loop.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 31, 2026</span>
+      <span>~8 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>Someone forwards you a screenshot: they clicked a shared link to a former colleague's OneDrive and got a browser page that just says <span class="k">404 FILE NOT FOUND</span>. The question that lands in your lap is simple — <em>"is this user's data still there, or is it gone?"</em> — and the instinct is to read the 404 as the answer. It isn't.</p>
+
+<p>This is a real recovery, anonymized. The data came back. The interesting part isn't the restore command — it's understanding that a 404 is not a state, and that <strong>bringing the site back doesn't fix what deleted it</strong>. Restore it carelessly and you'll be doing this again in a month.</p>
+
+<h2 class="head"><span class="num">01</span>A 404 is not a diagnosis</h2>
+<p class="sub">The OneDrive URL can 404 for half a dozen reasons. Only one of them is "deleted."</p>
+
+<p>A <span class="k">/personal/…</span> OneDrive URL returns <span class="k">404 FILE NOT FOUND</span> in several situations that have nothing to do with the data being destroyed. Before you conclude anything, know which of these you're looking at:</p>
+
+<table class="cmp">
+  <tr><th>What a 404 can mean</th><th>Is the data gone?</th></tr>
+  <tr><td>OneDrive was never provisioned (user never signed in to it)</td><td>Nothing to lose — it never existed</td></tr>
+  <tr><td>Account exists but is unlicensed / has no SharePoint license</td><td>No — data intact, just not reachable this way</td></tr>
+  <tr><td>Site archived into Microsoft 365 Archive</td><td>No — intact, read-only until reactivated</td></tr>
+  <tr><td>URL suffix is simply wrong (UPN ≠ path)</td><td>No — you're knocking on the wrong door</td></tr>
+  <tr><td>Owner account deleted → site in the deleted-site bin</td><td>No — recoverable for a limited window</td></tr>
+  <tr><td>Deleted-site window elapsed → purged</td><td>Yes — now it's actually gone</td></tr>
+</table>
+
+<p>So the browser tells you nothing decisive. The authoritative answer lives in SharePoint Online, not in a URL. You have to go ask the service directly.</p>
+
+<div class="analogy">
+  <p class="tag">Mental model</p>
+  <p>A 404 on a OneDrive URL is a locked front door, not an empty house. The door being locked tells you that you can't walk straight in — it says nothing about whether the furniture is still inside. To find out, you stop rattling the handle and go check the property records.</p>
+</div>
+
+<h2 class="head"><span class="num">02</span>Ask SharePoint, not the browser</h2>
+<p class="sub">Connect to SPO and check three places in order: active sites, the deleted-site bin, then the user object.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Use Windows PowerShell 5.1, and connect with a real SharePoint Admin</h3>
+    <p>The SPO module (<span class="k">Microsoft.Online.SharePoint.PowerShell</span>) runs on Windows PowerShell 5.1, not PowerShell 7 — if <span class="k">Connect-SPOService</span> is "not recognized," you're in the wrong shell or the module isn't installed. And note the split later: <em>reading</em> the deleted-site bin can succeed with lower rights, but <strong>restoring</strong> needs the SharePoint Administrator role. If restore throws "Attempted to perform an unauthorized operation," that's the tell — you're under-privileged, not blocked by a bug.</p>
+  </div>
+</div>
+
+<pre class="code">Install-Module -Name Microsoft.Online.SharePoint.PowerShell -Scope CurrentUser -Force
+Import-Module Microsoft.Online.SharePoint.PowerShell
+<b>Connect-SPOService</b> -Url https://contoso-admin.sharepoint.com</pre>
+
+<p>Now work the three checks in order. First, is there a live site? Second, is it in the deleted-site bin? OneDrive URLs replace <span class="k">@</span> and <span class="k">.</span> in the UPN with underscores, so <span class="k">jordan.reyes@contoso.com</span> becomes <span class="k">…/personal/jordan_reyes_contoso_com</span>.</p>
+
+<pre class="code"><span class="muted"># 1. is there an ACTIVE site? (a 404 in the browser often still has a live site behind it)</span>
+<b>Get-SPOSite</b> -Identity "https://contoso-my.sharepoint.com/personal/jordan_reyes_contoso_com"
+<span class="muted">#   -> "Cannot get site ..."  means no active site. Keep going.</span>
+
+<span class="muted"># confirm there's no active personal site under that name anywhere</span>
+<b>Get-SPOSite</b> -IncludePersonalSite $true -Limit All -Filter "Url -like 'jordan_reyes'"
+<span class="muted">#   -> empty result = no live OneDrive for this user</span>
+
+<span class="muted"># 2. is it in the DELETED-SITE bin?</span>
+<b>Get-SPODeletedSite</b> -Identity "https://contoso-my.sharepoint.com/personal/jordan_reyes_contoso_com"</pre>
+
+<p>In this recovery, the active lookups came back empty but the deleted-site query <em>found</em> it — with a deletion timestamp and a <span class="k">DaysRemaining</span> countdown:</p>
+
+<pre class="code">Url                                                            DaysRemaining  DeletionTime
+---                                                            -------------  ------------
+https://contoso-my.sharepoint.com/personal/jordan_reyes_...              23   8/08/2026 3:51 AM</pre>
+
+<p>That single row reframes everything. The data isn't gone — it's in the recycle bin for site collections, on a clock. A personal OneDrive lands here for one dominant reason: <strong>the owning user account was deleted.</strong> The account deletion is the cause; the OneDrive deletion is the downstream effect. Which means the browser 404 was real deletion — just recoverable deletion, for now.</p>
+
+<div class="mr">
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#A32D2D" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">The 404 means the OneDrive is permanently gone.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#3B6D11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">It's almost always in the deleted-site bin, fully recoverable — until the retention window elapses. The browser can't see the bin; only SPO can.</p></div></div></div>
+  </div>
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#A32D2D" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">Restoring the site puts the user's OneDrive back to normal.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#3B6D11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">The <strong>files</strong> come back, but the <strong>owner</strong> doesn't — that user object is gone from the directory. You get an ownerless orphan, not a working account.</p></div></div></div>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">03</span>Restore, then take ownership</h2>
+<p class="sub">Bring the site back from the bin and grant yourself site-collection admin so you can actually get in.</p>
+
+<p>With SharePoint Admin rights, the restore is one command. Then confirm it flipped to active, and — because the original owner no longer exists — assign a living admin (you, or the data owner) so the site is reachable.</p>
+
+<pre class="code"><span class="muted"># 1. restore from the deleted-site bin</span>
+<b>Restore-SPODeletedSite</b> -Identity "https://contoso-my.sharepoint.com/personal/jordan_reyes_contoso_com"
+
+<span class="muted"># 2. confirm it's active again (give it a minute if it errors immediately)</span>
+<b>Get-SPOSite</b> -Identity "https://contoso-my.sharepoint.com/personal/jordan_reyes_contoso_com" |
+  Select-Object Url, Owner, Status, StorageQuota
+
+<span class="muted"># 3. grant a real, living admin so the ownerless site is reachable</span>
+<b>Set-SPOUser</b> -Site "https://contoso-my.sharepoint.com/personal/jordan_reyes_contoso_com" `
+  -LoginName admin.recovery@contoso.com -IsSiteCollectionAdmin $true</pre>
+
+<p>A note on that login name: it has to resolve <em>in this tenant</em>. If you're a guest, the straight UPN fails and you need the external form (<span class="k">user_domain.com#ext#@tenant.onmicrosoft.com</span>); if you're a native member, the plain UPN just works. Rather than guess, try the UPN first — success or "user does not exist" tells you immediately which identity type you are. Once the grant returns your name with <span class="k">IsSiteCollectionAdmin</span> set, open the OneDrive URL in a browser and you'll land straight in the user's files as admin.</p>
+
+<h2 class="head"><span class="num">04</span>The orphan trap</h2>
+<p class="sub">You restored the container. You did not restore the owner. The tenant notices.</p>
+
+<p>Here's the part that catches people. The restore succeeded, the files are all there, you can browse them — problem solved, right? No. The <strong>user object is still deleted</strong>. Nothing you did re-created the account. So what you now have is a personal site with no valid owner: an <em>orphaned</em> OneDrive. And most tenants are configured to clean those up automatically.</p>
+
+<pre class="code"><span class="muted"># what's the tenant's cleanup window for ownerless personal sites?</span>
+<b>Get-SPOTenant</b> | Select-Object OrphanedPersonalSitesRetentionPeriod
+<span class="muted"># OrphanedPersonalSitesRetentionPeriod : 30</span></pre>
+
+<p>Thirty days. The restore didn't fix the root cause — it just started a <em>new</em> clock. Left alone, this OneDrive gets re-queued for deletion in about a month, and you're back where you started. The lesson is uncomfortable but clean: <strong>restoring an orphaned OneDrive buys you a window to extract the data, nothing more.</strong> It is not a place to leave data living long-term.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div>
+    <h3>Route sensitive content to an authorized recipient, and log the privileged actions</h3>
+    <p>A departed employee's OneDrive frequently holds sensitive material — finance records, client data, PII. Recovery isn't "grab it and go." Confirm <em>who</em> is authorized to receive it (the manager or data owner) before you move anything, send it to a real owned location rather than your own machine, and record the privileged-role activation, the restore, and the admin grant in your change ticket with the site's re-deletion date. On a client tenant especially, that paper trail is what protects you later.</p>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">05</span>Close the loop — extract, then prevent the repeat</h2>
+<p class="sub">Move the data to a real home, dispose of the orphan, and fix offboarding so it never orphans again.</p>
+
+<p>There is no setting that says "keep this ownerless OneDrive alive forever," and you shouldn't want one. The right move is to get the data off the orphan clock entirely by giving it a real owner somewhere else, then re-dispose of the empty husk:</p>
+
+<pre class="code"><span class="muted"># extract the data to a durable, OWNED location while the window is open:</span>
+<span class="muted">#   - a department SharePoint document library (best: it has a real owner), or</span>
+<span class="muted">#   - the manager's / data owner's OneDrive</span>
+<span class="muted"># for large trees (thousands of items) prefer Migration Manager or a scripted copy</span>
+<span class="muted"># over clicking through the browser.</span>
+
+<span class="muted"># once the data is safely moved and confirmed, re-dispose of the orphaned site</span>
+<span class="muted"># so you don't leave an ownerless personal site sitting active (an audit flag).</span></pre>
+
+<p>Then fix the actual failure. This whole exercise happened because the user was deleted with <strong>no data handoff</strong>. The prevention is an offboarding step, not a SharePoint command:</p>
+
+<table class="ref">
+  <tr><th>Prevention</th><th>What it does</th></tr>
+  <tr><td>Grant-manager-on-deletion (OneDrive setting)</td><td>Automatically gives the leaver's manager access to the OneDrive when the account is deleted, so data transfers before purge.</td></tr>
+  <tr><td>Retention policy (Purview)</td><td>Preserves OneDrive/SharePoint content independently of the account, so deletion of the user doesn't take the data with it.</td></tr>
+  <tr><td>Offboarding checklist</td><td>Make "transfer OneDrive to manager / archive to library" a required step <em>before</em> the account is deleted — the cheapest fix of all.</td></tr>
+</table>
+
+<div class="takeaway">
+  <p class="tag">The one-line model</p>
+  <p>A 404 isn't a diagnosis — check the deleted-site bin before you conclude anything. And restoring an orphaned OneDrive brings back the files, not the owner: it buys you a window to move the data somewhere real, not a permanent home. Fix offboarding so the OneDrive is handed off <em>before</em> the account is deleted, and the orphan never happens.</p>
+</div>
+
+<div class="sources">
+<h2>Further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/sharepoint/restore-deleted-site-collection">Restore deleted OneDrive / site collections — Microsoft Learn</a><span>Get-SPODeletedSite / Restore-SPODeletedSite</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/sharepoint/retention-and-deletion">OneDrive retention and deletion for former employees</a><span>the deletion timeline and grant-manager-access setting</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/purview/retention">Learn about retention policies — Microsoft Purview</a><span>preserving content independent of the account</span></li>
+</ul>
+</div>
+
+</div>
+</article>
+
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="dark"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/forensics/">Forensics</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>
