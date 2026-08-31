@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>What the logs won't tell you: reading activity telemetry without over-reading it — Blue Team of One</title>
+<meta name="description" content="Reading Microsoft 365 activity telemetry — sign-ins, endpoint process events, sent mail — without inventing a story between the events. A tiered mental model, the KQL pack, and the limitations that belong in every report.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=29">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/detection/">Detection Engineering</a><span class="sep">›</span><a href="/detection/kql-hunting.html">Advanced hunting (KQL)</a></p>
+    <p class="eyebrow"><span class="dot"></span>Advanced hunting · reading telemetry honestly</p>
+    <h1>What the logs <em>won't tell you</em></h1>
+    <p class="lede">Every so often you're asked to pull someone's computer activity and say whether they were "really working." You usually can pull the data. The skill is reading it without inventing a story in the gaps — a tiered mental model, the KQL I use, and the limitations that belong in every report.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>August 31, 2026</span>
+      <span>~10 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+  <p>Every so often a request lands on the security team that isn't really a security request. It sounds like this: <em>"Can you pull the computer activity for this person and tell us whether they were actually working on these dates?"</em></p>
+
+  <p>It usually comes with a good reason attached, and you usually can pull the data. Microsoft 365 gives you sign-in logs, Defender gives you endpoint process activity, and mailbox telemetry gives you sent mail. Three solid sources, all queryable from one place.</p>
+
+  <p>Here's the thing nobody asking the question wants to hear: <strong>none of those sources record whether a human was sitting at the keyboard.</strong> They record discrete events — an app launched, a mail sent, a token issued. Between those events is a void, and the entire skill of this kind of work is refusing to fill that void with a story.</p>
+
+  <p>This post is the mental model and the KQL I use, plus a walkthrough of how to read the output without lying to yourself. All names, domains, devices, dates, and mail subjects below are fictional (<span class="k">jordan.rivera@contoso.com</span>, device <span class="k">CONTOSO-WKS4471</span>) — but the <em>patterns</em> are real, because the patterns are the lesson.</p>
+
+  <div class="analogy">
+    <p class="tag">Mental model</p>
+    <p>The telemetry is a motion-sensor light in a hallway, not a camera. It fires when something crosses it — and stays dark while someone sits perfectly still in the room. A dark hallway is not an empty one.</p>
+  </div>
+
+  <h2 class="head"><span class="num">01</span>The mental model: three tiers of signal</h2>
+  <p class="sub">Sort every source into a tier before you query. Getting this wrong is how activity reviews turn into fiction.</p>
+
+  <p>Build almost entirely from Tier 1, corroborate with Tier 2, and name Tier 3 explicitly so you can set it aside.</p>
+
+  <table class="cmp">
+    <tr><th>Tier</th><th>What it is</th><th>Sources</th><th>How to treat it</th></tr>
+    <tr><td><strong>1 · Genuine human work</strong></td><td>Events a person almost certainly caused deliberately</td><td><span class="k">EmailEvents</span> (sent mail); discrete Office app launches in <span class="k">DeviceProcessEvents</span></td><td>Your backbone — build the narrative from these</td></tr>
+    <tr><td><strong>2 · Auth moments</strong></td><td>A human proved who they were at a point in time</td><td><span class="k">SigninLogs</span> (interactive sign-ins)</td><td>Corroboration — anchors a day, not a duration</td></tr>
+    <tr><td><strong>3 · Machine noise</strong></td><td>Software-generated events that look like activity</td><td><span class="k">AADNonInteractiveUserSignInLogs</span> (token refreshes); browser helper processes</td><td>Name it, explain it, exclude it — never presence</td></tr>
+  </table>
+
+  <p>The mistake I see over and over: someone pulls a Tier 3 source, sees thousands of events around the clock, and writes <em>"user was active 24/7."</em> They weren't active. Their laptop was powered on. Those are not the same sentence.</p>
+
+  <div class="takeaway">
+    <p class="tag">The one-line model</p>
+    <p>Build from Tier 1, corroborate with Tier 2, name-and-exclude Tier 3. Everything that goes wrong in these reviews is a Tier 3 event promoted to presence.</p>
+  </div>
+
+  <h2 class="head"><span class="num">02</span>The KQL pack</h2>
+  <p class="sub">Runs in Microsoft Sentinel / Log Analytics (Advanced Hunting works too, with the retention caveat at the end). Set the parameters once at the top of each query.</p>
+
+  <div class="caveat">
+    <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+    <div><h3>Don't fight <span class="k">AADSignInEventsBeta</span></h3><p>If you reach for it in Advanced Hunting and get <span class="k">Failed to resolve table or column expression named 'AADSignInEventsBeta'</span>, that table isn't provisioned in your tenant — it depends on the Entra ↔ Defender identity integration being enabled. <span class="k">SigninLogs</span> in Sentinel is the authoritative interactive sign-in source, and it's what the rest of this pack uses.</p></div>
+  </div>
+
+  <h3>1 · Interactive sign-ins — the "was a human here" anchor</h3>
+  <p>Anchor on the moments a real logon prompt was satisfied.</p>
+<pre class="code">let subjectUpn = "jordan.rivera@contoso.com";
+SigninLogs
+| where UserPrincipalName =~ subjectUpn
+| where ResultType == 0                       <span class="muted">// successful only</span>
+| extend ETime = datetime_utc_to_local(TimeGenerated, "America/New_York")
+| where (ETime between (datetime(2025-03-02) .. datetime(2025-03-09)))
+     or (ETime between (datetime(2025-03-23) .. datetime(2025-03-30)))
+| extend Device = tostring(DeviceDetail.displayName)
+| project ETime, AppDisplayName, Device, ClientAppUsed, IPAddress
+| sort by ETime asc</pre>
+
+  <p>And the version that collapses to one row per day — this is what feeds a report:</p>
+<pre class="code">let subjectUpn = "jordan.rivera@contoso.com";
+SigninLogs
+| where UserPrincipalName =~ subjectUpn
+| where ResultType == 0
+| extend ETime = datetime_utc_to_local(TimeGenerated, "America/New_York")
+| where (ETime between (datetime(2025-03-02) .. datetime(2025-03-09)))
+     or (ETime between (datetime(2025-03-23) .. datetime(2025-03-30)))
+| summarize FirstSignIn = min(ETime), LastSignIn = max(ETime), SignIns = count()
+    by Day = format_datetime(ETime, "yyyy-MM-dd")
+| sort by Day asc</pre>
+
+  <h3>2 · Non-interactive sign-ins — the noise you need to <em>see</em> to discount</h3>
+  <p>Don't skip this one. You run it not to use it as activity, but to prove to yourself — and to whoever reads the report — <em>why</em> interactive sign-ins are sparse.</p>
+<pre class="code">let subjectUpn = "jordan.rivera@contoso.com";
+AADNonInteractiveUserSignInLogs
+| where UserPrincipalName =~ subjectUpn
+| where ResultType == 0
+| extend ETime = datetime_utc_to_local(TimeGenerated, "America/New_York")
+| where (ETime between (datetime(2025-03-02) .. datetime(2025-03-09)))
+     or (ETime between (datetime(2025-03-23) .. datetime(2025-03-30)))
+| summarize First = min(ETime), Last = max(ETime), Events = count()
+    by Day = format_datetime(ETime, "yyyy-MM-dd")
+| sort by Day asc</pre>
+
+  <h3>3 · Endpoint logon — OS-level corroboration of Tier 2</h3>
+<pre class="code">let subjectDevice = "CONTOSO-WKS4471";
+DeviceLogonEvents
+| where DeviceName startswith subjectDevice
+| extend ETime = datetime_utc_to_local(Timestamp, "America/New_York")
+| where (ETime between (datetime(2025-03-02) .. datetime(2025-03-09)))
+     or (ETime between (datetime(2025-03-23) .. datetime(2025-03-30)))
+| where ActionType in ("LogonSuccess","Logon","LogoffSuccess","Lock","Unlock")
+| project ETime, ActionType, LogonType, AccountName, DeviceName
+| sort by ETime asc</pre>
+
+  <h3>4 · Application activity — Tier 1, but only after you strip the noise</h3>
+  <p>The naive version pulls every process. A modern browser spawns dozens of helper processes an hour, and if you count those as "activity" you'll report someone browsing at 3&nbsp;a.m. when their machine was idle. The fix is one line: <strong>the human-launched browser has no <span class="k">--type=</span> argument; the child/utility processes do.</strong></p>
+<pre class="code">let subjectDevice = "CONTOSO-WKS4471";
+let realApps = dynamic(["OUTLOOK.EXE","ms-teams.exe","Teams.exe","EXCEL.EXE",
+"WINWORD.EXE","POWERPNT.EXE","Acrobat.exe","AcroRd32.exe","msedge.exe","chrome.exe"]);
+DeviceProcessEvents
+| where DeviceName startswith subjectDevice
+| extend ETime = datetime_utc_to_local(Timestamp, "America/New_York")
+| where (ETime between (datetime(2025-03-02) .. datetime(2025-03-09)))
+     or (ETime between (datetime(2025-03-23) .. datetime(2025-03-30)))
+| where FileName in~ (realApps)
+<span class="muted">// drop browser child/helper processes — keep only the user-launched instance</span>
+| where not((FileName in~ ("chrome.exe","msedge.exe")) and ProcessCommandLine has "--type=")
+| project ETime, FileName, ProcessCommandLine, AccountName
+| sort by ETime asc</pre>
+
+  <h3>5 · Sent email — your single most reliable human signal</h3>
+<pre class="code">let subjectUpn = "jordan.rivera@contoso.com";
+EmailEvents
+| where SenderFromAddress =~ subjectUpn
+| where EmailDirection == "Outbound"
+| extend ETime = datetime_utc_to_local(Timestamp, "America/New_York")
+| where (ETime between (datetime(2025-03-02) .. datetime(2025-03-09)))
+     or (ETime between (datetime(2025-03-23) .. datetime(2025-03-30)))
+| project ETime, Subject, NetworkMessageId, DeliveryAction
+| sort by ETime asc</pre>
+
+  <p><span class="k">EmailEvents</span> gives you a recipient <em>object ID</em>, not an address. If you need the actual recipients, join to <span class="k">EmailRecipientInfo</span>:</p>
+<pre class="code"><span class="muted">// ... continue from EmailEvents above ...</span>
+| join kind=leftouter (
+    EmailRecipientInfo
+    | project NetworkMessageId, RecipientEmailAddress
+) on NetworkMessageId
+| project ETime, Subject, RecipientEmailAddress, DeliveryAction</pre>
+
+  <h2 class="head"><span class="num">03</span>Reading the results without over-reading them</h2>
+  <p class="sub">The masked excerpts below are shaped exactly like real output — and each one has a trap in how you read it.</p>
+
+  <h3>Interactive sign-ins: the "gap" that isn't a gap</h3>
+  <p>The daily query comes back looking alarmingly empty — four rows for a fourteen-day window:</p>
+  <table class="cmp">
+    <tr><th>Day</th><th>FirstSignIn</th><th>LastSignIn</th><th>SignIns</th></tr>
+    <tr><td>2025-03-04</td><td>05:43 AM</td><td>05:43 AM</td><td>1</td></tr>
+    <tr><td>2025-03-23</td><td>06:31 AM</td><td>06:31 AM</td><td>1</td></tr>
+    <tr><td>2025-03-26</td><td>08:24 AM</td><td>09:49 AM</td><td>20</td></tr>
+    <tr><td>2025-03-29</td><td>04:57 PM</td><td>05:42 PM</td><td>2</td></tr>
+  </table>
+  <p>First instinct: <em>"They only signed in on four days — were they even working the rest of the time?"</em> <strong>Wrong instinct.</strong> An interactive sign-in fires when someone satisfies a <em>fresh</em> logon prompt. If a user never fully signs out — they lock the screen and walk away, or just close the lid — the session persists for days and no new interactive sign-in is logged. Sparse interactive sign-ins don't mean absence; they mean a persistent session. To confirm that's what you're looking at, you run query #2.</p>
+
+  <h3>Non-interactive sign-ins: the wall of noise</h3>
+  <p>Query #2 comes back with a row for <em>every</em> day, including the weekend, every one of them enormous:</p>
+  <table class="cmp">
+    <tr><th>Day</th><th>First</th><th>Last</th><th>Events</th></tr>
+    <tr><td>2025-03-02</td><td>(prev) 08:01 PM</td><td>07:59 PM</td><td>945</td></tr>
+    <tr><td>2025-03-04</td><td>(prev) 08:00 PM</td><td>07:59 PM</td><td>1346</td></tr>
+    <tr><td>2025-03-05</td><td>(prev) 08:00 PM</td><td>07:59 PM</td><td>1340</td></tr>
+    <tr><td>2025-03-08 <em>(Sat)</em></td><td>(prev) 08:01 PM</td><td>07:59 PM</td><td>967</td></tr>
+    <tr><td>2025-03-09 <em>(Sun)</em></td><td>(prev) 08:05 PM</td><td>07:58 PM</td><td>936</td></tr>
+  </table>
+  <p>Two tells that this is machine noise, not a person. First, <strong>it never stops</strong> — every day spans roughly 8:00&nbsp;PM the previous evening to 8:00&nbsp;PM, a continuous 24-hour band. (That 8&nbsp;PM boundary is just midnight UTC rendered in US Eastern; it's an artifact of the time-zone conversion, not a human clocking in at 8&nbsp;PM.) Real humans don't generate steady auth traffic at 3&nbsp;a.m. on a Sunday — background services do: Outlook sync, Teams presence, OneDrive, mobile apps all silently refresh tokens around the clock. Second, <strong>the volume</strong> — hundreds to over a thousand events a day. No one performs a thousand deliberate sign-ins.</p>
+
+  <div class="caveat">
+    <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+    <div><h3>This table is proof of a session, not a presence signal</h3><p>It explains the sparse interactive sign-ins from #1 — a persistent authenticated session — and it is worthless as evidence anyone was <em>at</em> the machine. Put "signed in 24/7" in a report off the back of this and you've actively misled the reader. Name it, explain it, set it aside.</p></div>
+  </div>
+
+  <h3>Process events: the browser's heartbeat vs. real work</h3>
+  <p>Run the process query <em>without</em> the <span class="k">--type=</span> filter and Chrome drowns everything — clusters at oddly regular times, every one carrying a <span class="k">--type=</span> and landing at <span class="k">:50</span> past the hour:</p>
+  <table class="cmp">
+    <tr><th>ETime</th><th>FileName</th><th>ProcessCommandLine (truncated)</th></tr>
+    <tr><td>12:50 AM</td><td>chrome.exe</td><td><span class="k">--type=utility --utility-sub-type=unzip.mojom.Unzipper …</span></td></tr>
+    <tr><td>01:50 AM</td><td>chrome.exe</td><td><span class="k">--type=utility --utility-sub-type=patch.mojom.FilePatcher …</span></td></tr>
+    <tr><td>02:50 AM</td><td>chrome.exe</td><td><span class="k">--type=renderer …</span></td></tr>
+  </table>
+  <p>These are Chrome's own background/updater helper processes — the browser maintaining itself, not a person browsing at 2&nbsp;a.m. With the filter applied, the same day's <em>real</em> application activity is far quieter and far more honest:</p>
+  <table class="cmp">
+    <tr><th>ETime</th><th>FileName</th></tr>
+    <tr><td>06:01 AM</td><td>ms-teams.exe</td></tr>
+    <tr><td>08:20 AM</td><td>EXCEL.EXE</td></tr>
+    <tr><td>08:34 AM</td><td>EXCEL.EXE</td></tr>
+  </table>
+  <p>That's the signal. A Teams launch first thing, Excel worked mid-morning. Sparse, but <em>real</em>. One subtlety worth internalizing: <strong>you'll see zero <span class="k">OUTLOOK.EXE</span> launches on days the person clearly sent email.</strong> That's not a contradiction — Outlook was already open from a previous day, so it never generated a new launch event. Which is exactly why sent mail, not app launches, is your anchor.</p>
+
+  <h3>Sent email: the honest baseline</h3>
+  <table class="cmp">
+    <tr><th>ETime</th><th>Subject</th><th>DeliveryAction</th></tr>
+    <tr><td>03-23 06:02 AM</td><td>RE: Q3 forecast delay</td><td>Delivered</td></tr>
+    <tr><td>03-23 07:04 AM</td><td>Re: Today's sync</td><td>Delivered</td></tr>
+    <tr><td>03-23 08:41 AM</td><td>RE: Q3 forecast delay</td><td>Delivered</td></tr>
+    <tr><td>03-23 09:15 AM</td><td>Re: Q3 forecast delay</td><td>Delivered</td></tr>
+  </table>
+  <p>Substantive, timestamped, unambiguously human. A person wrote each of these and sent it. This is the closest thing you have to ground truth — and notice it lands on a day (03-23) where interactive sign-in showed only a single 6:31&nbsp;AM event. Tier 1 fills in what Tier 2 leaves blank.</p>
+
+  <h3>Assembling a defensible day</h3>
+  <div class="analogy">
+    <p class="tag">One defensible day · Monday 03-23</p>
+    <p>Interactive sign-in ~6:31&nbsp;AM. Teams launched ~6:01&nbsp;AM; four emails sent between 6:02 and 9:15&nbsp;AM on the "Q3 forecast" thread; Excel worked 8:20–8:34&nbsp;AM. <strong>Last captured activity: ~9:16&nbsp;AM.</strong></p>
+  </div>
+  <p>Every clause traces to a Tier 1 or Tier 2 event. Nothing is inferred from Tier 3. And note the careful phrase <strong>"last captured activity"</strong> — not "stopped working at 9:16." Which brings us to the part that matters most.</p>
+
+  <h2 class="head"><span class="num">04</span>The limitations that belong in every report</h2>
+  <p class="sub">If you take one thing from this post, take this section. The limitations <em>are</em> the analysis.</p>
+
+  <p><strong>Discrete events, not continuous input.</strong> The telemetry records launches, sign-ins, and sends. It does not record keyboard and mouse activity. Reading, phone calls, meetings, and working inside an already-open app generate <em>no events</em> — so a quiet stretch is not evidence someone stepped away.</p>
+
+  <p><strong>Absence of an event is not evidence of absence.</strong> No sign-in on a given day doesn't mean no work (persistent session). No sent mail doesn't mean idle (maybe they had no reason to email). You can affirm what the events show; you cannot affirm what their silence means.</p>
+
+  <p><strong>No reliable end-of-day marker.</strong> There's usually no dependable logoff or shutdown event. "Last captured activity" is a floor, not a stop time — the person may well have kept working in an open app afterward.</p>
+
+  <p><strong>Machine noise is not presence.</strong> Non-interactive token refreshes and browser helper processes run whether or not a human is there. They belong in a "what we excluded and why" note, never in the activity narrative.</p>
+
+  <p>A report that states these plainly is not weaker for it — it's the only kind that survives scrutiny, and it protects the subject from being misjudged on background noise just as much as it keeps you honest.</p>
+
+  <h2 class="head"><span class="num">05</span>Takeaways</h2>
+  <p class="sub">The discipline isn't KQL. It's writing down only what you can defend.</p>
+
+  <ul>
+    <li><strong>Sort your sources into tiers before you query.</strong> Human work, auth moments, machine noise. Build from the first, corroborate with the second, name-and-exclude the third.</li>
+    <li><strong>The most impressive-looking table is usually the least meaningful.</strong> Thousands of round-the-clock events is a screensaver, not a workday.</li>
+    <li><strong><span class="k">--type=</span> is your friend</strong> for stripping browser chatter out of <span class="k">DeviceProcessEvents</span>.</li>
+    <li><strong>Sent mail is your ground truth;</strong> interactive sign-ins corroborate; everything else needs a skeptic reading it.</li>
+    <li><strong>Write the limitations first, not last.</strong> They're not boilerplate. They're the reason anyone should trust the rest.</li>
+  </ul>
+
+  <div class="takeaway">
+    <p class="tag">The one-line model</p>
+    <p>Look at a fourteen-day window with four sign-ins and a thousand nightly token refreshes, and write down only what you can actually defend. In a field that loves confident dashboards, the most senior move is to say "the data doesn't support that" — and mean it.</p>
+  </div>
+
+</div>
+</article>
+
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Ram Mudigina · Blue Team of One</span>
+    <span><a href="/index.html">Home</a> · <a href="/about.html">About</a></span>
+  </div>
+</footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>
