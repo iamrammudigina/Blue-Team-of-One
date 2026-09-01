@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How Sentinel detects: rules, alerts, incidents, and the hunt — Blue Team of One</title>
+<meta name="description" content="Part 2 of a Sentinel series — how detection is actually built: analytics rules (templates vs custom, and why a rule is more than its KQL), rule types, watchlists, the alert-to-incident chain and honest grouping, proactive hunting, notebooks, and entity behaviour.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=29">
+<style>
+  figure.diagram{margin:30px 0; padding:0}
+  figure.diagram svg{display:block; width:100%; height:auto;
+    background:#12161c; border:1px solid #232a33; border-radius:10px}
+  figure.diagram figcaption{margin-top:10px; font-family:var(--mono); font-size:12.5px;
+    color:var(--ink-3); line-height:1.5}
+  figure.diagram figcaption b{color:var(--ink-2)}
+  .routebox{border:1px solid var(--line); border-radius:8px; background:var(--bg-2); padding:4px 18px; margin:26px 0}
+  .routebox li{margin:12px 0; color:var(--ink-2)}
+  .routebox b{color:var(--ink)}
+  .series-nav{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:2px 0 24px; font-family:var(--mono); font-size:12.5px}
+  .series-nav .lab{color:var(--ink-3); text-transform:uppercase; letter-spacing:.05em; margin-right:6px}
+  .series-nav a,.series-nav .cur{padding:5px 11px; border-radius:6px; border:1px solid var(--line); color:var(--ink-2); text-decoration:none}
+  .series-nav a:hover{border-color:var(--accent-dim); color:var(--ink)}
+  .series-nav .cur{background:var(--signal-bg); border-color:var(--accent); color:var(--accent)}
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/detection/">Detection Engineering</a><span class="sep">›</span><a href="/detection/sentinel-platform.html">Sentinel, end to end</a></p>
+    <p class="eyebrow"><span class="dot"></span>SIEM architecture · part 2 of a series</p>
+    <h1>How Sentinel detects: <em>rules, alerts, incidents, and the hunt</em></h1>
+    <p class="lede">Part 1 left the warehouse full of well-sorted data — and it still hadn't caught anyone. Storage isn't detection. This is the part that turns tables into a SIEM: the rules that read the data, the alerts they raise, the incidents you assemble from them, and the two other stances — hunting and entity analysis — that catch what the rules were never written to see.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>September 1, 2026</span>
+      <span>~15 min read · foundations</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+      <nav class="series-nav" aria-label="Series navigation"><span class="lab">Series · Sentinel, end&nbsp;to&nbsp;end</span><a href="/posts/sentinel-siem-architecture.html">1 · Foundation</a><span class="cur" aria-current="page">2 · Detection</span><a href="/posts/sentinel-response-automation-playbooks.html">3 · Response</a></nav>
+
+  <p>Connecting a source and watching its table fill up feels like progress, and it's the moment most people believe they're "covered." They aren't. A full table detects nothing on its own — it's raw material. Detection is a separate act: something has to <em>read</em> that data and decide "this is worth a human's attention." In Sentinel there are three different stances you can take toward the same tables, and a mature practice runs all three.</p>
+
+  <div class="analogy">
+    <p class="tag">Mental model</p>
+    <p>Rules are the smoke detectors you wired to the ceiling — they answer questions you already knew to ask, because you installed them. Hunting is walking the building at 2 a.m. with a flashlight, looking for the thing no detector covers. And the entity page is what you do once an alarm goes off: stop asking "which sensor tripped" and start asking "what is <em>this</em> person actually doing." Reactive, proactive, investigative — same building, three ways of looking.</p>
+  </div>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 960 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The detection engine: tables feed an analytics rule that raises alerts, which group into an incident that flows to response. Hunting loops in from above by promoting confirmed patterns into rules; the entity page pivots in from below.">
+      <defs><marker id="a1" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#5ea1ff"/></marker>
+      <marker id="a2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#6fd08c"/></marker>
+      <marker id="a3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#f2d45c"/></marker></defs>
+
+      <!-- middle flow -->
+      <rect x="24" y="170" width="120" height="60" rx="8" fill="#1c222b" stroke="#2f3742"/>
+      <text x="84" y="196" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#aab3c0">TABLES</text>
+      <text x="84" y="213" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" fill="#6d7787">stored data</text>
+
+      <line x1="144" y1="200" x2="192" y2="200" stroke="#5ea1ff" stroke-width="2" marker-end="url(#a1)"/>
+
+      <rect x="196" y="158" width="176" height="84" rx="10" fill="#241f0c" stroke="#f2d45c"/>
+      <text x="284" y="184" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="#f2d45c">ANALYTICS RULE</text>
+      <text x="284" y="203" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" fill="#aab3c0">reads data on a schedule,</text>
+      <text x="284" y="219" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" fill="#aab3c0">decides what matters</text>
+
+      <line x1="372" y1="200" x2="420" y2="200" stroke="#5ea1ff" stroke-width="2" marker-end="url(#a1)"/>
+
+      <rect x="424" y="170" width="120" height="60" rx="8" fill="#1c222b" stroke="#2f3742"/>
+      <text x="484" y="196" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#8fc0ff">ALERT</text>
+      <text x="484" y="213" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" fill="#6d7787">a single firing</text>
+
+      <line x1="544" y1="200" x2="592" y2="200" stroke="#5ea1ff" stroke-width="2" marker-end="url(#a1)"/>
+
+      <rect x="596" y="164" width="150" height="72" rx="9" fill="#12201f" stroke="#7fd0c2"/>
+      <text x="671" y="190" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="#7fd0c2">INCIDENT</text>
+      <text x="671" y="209" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" fill="#aab3c0">the case file —</text>
+      <text x="671" y="224" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" fill="#aab3c0">grouped alerts</text>
+
+      <line x1="746" y1="200" x2="812" y2="200" stroke="#6fd08c" stroke-width="2" marker-end="url(#a2)"/>
+      <text x="838" y="196" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#8fdca4">→ response</text>
+      <text x="838" y="211" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#6d7787">(Part 3)</text>
+
+      <!-- hunting above -->
+      <rect x="196" y="40" width="300" height="60" rx="9" fill="#0d1a26" stroke="#4a7fd0"/>
+      <text x="214" y="64" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#8fc0ff">HUNTING · proactive</text>
+      <text x="214" y="83" font-family="Inter, sans-serif" font-size="10.5" fill="#aab3c0">questions you didn't know to ask —</text>
+      <text x="214" y="96" font-family="Inter, sans-serif" font-size="10.5" fill="#aab3c0">a find graduates into a rule</text>
+      <path d="M346 100 C346 128 300 130 290 156" fill="none" stroke="#f2d45c" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a3)"/>
+      <text x="360" y="132" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#f2d45c">promote</text>
+
+      <!-- entity below -->
+      <rect x="470" y="300" width="330" height="60" rx="9" fill="#1b2230" stroke="#5ea1ff"/>
+      <text x="488" y="324" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#8fc0ff">ENTITY PAGE / UEBA · investigative</text>
+      <text x="488" y="343" font-family="Inter, sans-serif" font-size="10.5" fill="#aab3c0">flip the axis: not "what fired" but "who's involved"</text>
+      <path d="M660 300 C660 272 671 262 671 238" fill="none" stroke="#5ea1ff" stroke-width="2" marker-end="url(#a1)"/>
+      <text x="676" y="278" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#8fc0ff">pivot</text>
+
+      <text x="24" y="26" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#6d7787" letter-spacing=".06em">THREE STANCES TOWARD THE SAME DATA</text>
+    </svg>
+    <figcaption><b>The detection engine.</b> The horizontal spine — table → rule → alert → incident — is what most people mean by "detection." Hunting feeds it from above (find something, promote it to a rule); the entity page cuts in from below (pivot from the alert to the whole story of a user or host).</figcaption>
+  </figure>
+
+  <h2 class="head"><span class="num">01</span>Rules: the templates trap, and why a rule is more than its query</h2>
+  <p class="sub">Two buckets — Microsoft's templates and your own — and one misconception that leaves teams with a green connector and zero live detections.</p>
+
+  <p>When you add a connector, its detection content arrives from the <strong>Content Hub</strong> as part of a solution — but it arrives as rule <em>templates</em>, not running rules. You still have to create a rule <em>from</em> a template and switch it on. This is the single most common beginner misread: the connector is green, data is flowing, and nothing is actually watching it because no rule was ever activated. <strong>Data flowing is not detection running.</strong></p>
+
+  <p>Custom rules are where the craft lives — you write the KQL, decide what a single result <em>means</em>, and shape how findings behave. But here's the part that separates a working rule from a noisy one: <strong>the query is maybe half the rule.</strong> Every rule is its KQL <em>plus</em> a schedule, a threshold, entity mapping, and grouping logic — and the last two are what beginners skip.</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 900 268" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Anatomy of an analytics rule: a large query block plus schedule, threshold, entity mapping, and grouping. Skipping entity mapping means you can't pivot; skipping grouping means you drown.">
+      <rect x="20" y="40" width="860" height="210" rx="12" fill="none" stroke="#f2d45c" stroke-dasharray="5 5"/>
+      <text x="38" y="30" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#f2d45c" letter-spacing=".05em">ONE ANALYTICS RULE</text>
+      <!-- query big -->
+      <rect x="40" y="60" width="330" height="170" rx="9" fill="#241f0c" stroke="#f2d45c"/>
+      <text x="205" y="86" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12.5" font-weight="700" fill="#f2d45c">KQL QUERY</text>
+      <text x="205" y="108" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">the logic — what "bad" looks like</text>
+      <text x="205" y="210" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#6d7787">…but only ~half the rule</text>
+      <!-- four parts -->
+      <g font-family="Inter, sans-serif">
+        <rect x="392" y="60" width="220" height="52" rx="8" fill="#1c222b" stroke="#2f3742"/>
+        <text x="406" y="82" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#8fc0ff">SCHEDULE</text>
+        <text x="406" y="99" font-size="10.5" fill="#aab3c0">how often it runs · lookback</text>
+        <rect x="392" y="120" width="220" height="52" rx="8" fill="#1c222b" stroke="#2f3742"/>
+        <text x="406" y="142" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#8fc0ff">THRESHOLD</text>
+        <text x="406" y="159" font-size="10.5" fill="#aab3c0">how many hits before it fires</text>
+        <rect x="392" y="180" width="220" height="52" rx="8" fill="#1b2230" stroke="#5ea1ff"/>
+        <text x="406" y="202" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#8fc0ff">ENTITY MAPPING</text>
+        <text x="406" y="219" font-size="10.5" fill="#aab3c0">tie results to user / host / IP</text>
+
+        <rect x="632" y="60" width="238" height="52" rx="8" fill="#1b2230" stroke="#5ea1ff"/>
+        <text x="646" y="82" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#8fc0ff">GROUPING</text>
+        <text x="646" y="99" font-size="10.5" fill="#aab3c0">how alerts fold into incidents</text>
+        <!-- consequences -->
+        <rect x="632" y="120" width="238" height="52" rx="8" fill="#26131A" stroke="#f0868a"/>
+        <text x="646" y="141" font-size="10.5" fill="#f7999b">skip ENTITY MAPPING →</text>
+        <text x="646" y="158" font-size="10.5" fill="#f0868a">alerts you can't pivot on</text>
+        <rect x="632" y="180" width="238" height="52" rx="8" fill="#26131A" stroke="#f0868a"/>
+        <text x="646" y="201" font-size="10.5" fill="#f7999b">skip GROUPING →</text>
+        <text x="646" y="218" font-size="10.5" fill="#f0868a">a hundred duplicate incidents</text>
+      </g>
+    </svg>
+    <figcaption><b>A rule is an assembly, not a query.</b> Entity mapping is what makes an alert investigable and correlatable; grouping is what keeps one noisy signal from burying the queue. Write perfect KQL and skip these two, and you've built a detection nobody can actually use.</figcaption>
+  </figure>
+
+<pre class="code">SigninLogs
+| where ResultType == 0
+| where RiskLevelDuringSignIn == "high"
+| where AppDisplayName has "Azure Portal"
+<span class="muted">// the query is the easy part. the rule also needs:</span>
+<span class="muted">//   schedule  → run every 5m, look back 5m</span>
+<span class="muted">//   threshold → fire on >= 1 result</span>
+<span class="muted">//   entities  → map Account=UserPrincipalName, IP=IPAddress  (so you can pivot)</span>
+<span class="muted">//   grouping  → fold repeats for the same Account into one incident</span></pre>
+
+  <h2 class="head"><span class="num">02</span>The four kinds of rule</h2>
+  <p class="sub">"Analytics rule" is a small family, and one member is where the Defender-unification story quietly shows up.</p>
+
+  <table class="cmp">
+    <tr><th>Type</th><th>What it does</th><th>Reach for it when</th></tr>
+    <tr><td><strong>Scheduled</strong></td><td>Your KQL on a timer — you set frequency and lookback. The workhorse.</td><td>Almost always — this is what "a detection" usually means</td></tr>
+    <tr><td><strong>Near-real-time (NRT)</strong></td><td>Same idea, runs about once a minute with minimal delay; comes with constraints (a single query, limited lookback).</td><td>The handful of signals you can't wait ~5 minutes on</td></tr>
+    <tr><td><strong>Microsoft Security</strong></td><td>Turns alerts from other Microsoft security products into Sentinel incidents — it relays, it doesn't query tables.</td><td>Surfacing Defender / Defender for Cloud alerts as incidents</td></tr>
+    <tr><td><strong>Anomaly / ML</strong></td><td>Behavioural baselines and multistage correlation instead of logic you wrote.</td><td>Catching deviations you can't express as a query</td></tr>
+  </table>
+
+  <p>That third row is the seam we argued about in the foundations post: with Sentinel and Defender unified, a growing share of what used to be <em>your</em> custom detection now arrives pre-built as Defender alerts, flowing in through Microsoft Security rules. The honest read of "what's still distinctly SIEM" is the <strong>Scheduled</strong> and <strong>Anomaly</strong> rows — the custom logic for the sources Defender doesn't natively understand — plus the retention layer underneath.</p>
+
+  <h2 class="head"><span class="num">03</span>Watchlists: the context you bring to the data</h2>
+  <p class="sub">Connectors bring in what <em>happened</em>. Watchlists hold what you <em>know</em>. Crossing the two is where detection gets sharp.</p>
+
+  <p>A watchlist is a small, admin-curated lookup you import and maintain by hand — VIPs, known-good IP ranges, service-account inventory, terminated-employee lists, asset criticality. In a rule it does two opposite jobs: <strong>enrich/prioritise</strong> ("new-country sign-in <em>by a user on the VIP list</em>" — now it's worth waking someone) and <strong>filter/allowlist</strong> ("alert on admin logins <em>except</em> from IPs on my jump-box list"). Same join, in a workbook, turns anonymous rows into "that's the CFO's laptop."</p>
+
+  <div class="caveat">
+    <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+    <div><h3>A watchlist is reference data, not a log store</h3><p>It's built for small, slow-changing, human-curated lists — not tens of thousands of high-churn rows. The test: if the data <em>arrives on its own and grows</em>, it belongs in a table; if <em>you decide what's in it and it changes when you say so</em>, it's a watchlist. And it's maintenance debt: a terminated-users watchlist nobody updates is worse than none — it silently stops catching the person it exists for, while everyone keeps trusting it. Keep them small, curated, and current, or they lie to you.</p></div>
+  </div>
+
+  <h2 class="head"><span class="num">04</span>Alert → incident, and grouping done honestly</h2>
+  <p class="sub">The alert is a single fact. The incident is the story you assemble from related facts — and the art is drawing "related" tightly enough to be true.</p>
+
+  <p>The chain is precise: a rule runs, each qualifying result is an <strong>alert</strong>, and alerts are grouped into an <strong>incident</strong> — the unit a human actually works. Grouping is the right default, because without it one noisy source spawns a hundred near-identical incidents and the queue becomes useless. But <em>what you group by</em> decides whether grouping helps or hides.</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 900 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three grouping outcomes: deduplicating same-rule alerts into one incident is good; over-grouping staples two different attacks together and hides one; grouping different rules on one actor assembles the real attack story.">
+      <defs><marker id="g1" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0L8 4L0 8z" fill="#6d7787"/></marker></defs>
+      <!-- GOOD -->
+      <text x="24" y="34" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#6fd08c">✓ DEDUPE — right</text>
+      <g fill="#7fd0c2"><circle cx="40" cy="60" r="6"/><circle cx="64" cy="60" r="6"/><circle cx="88" cy="60" r="6"/><circle cx="52" cy="80" r="6"/><circle cx="76" cy="80" r="6"/></g>
+      <line x1="110" y1="70" x2="150" y2="70" stroke="#6d7787" stroke-width="1.6" marker-end="url(#g1)"/>
+      <rect x="156" y="48" width="150" height="46" rx="8" fill="#12201f" stroke="#6fd08c"/>
+      <text x="231" y="68" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#8fdca4">1 incident</text>
+      <text x="231" y="84" text-anchor="middle" font-family="Inter, sans-serif" font-size="10" fill="#6d7787">same rule, 5 firings</text>
+
+      <!-- OVER -->
+      <text x="24" y="150" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#f0868a">✗ OVER-GROUP — hides a threat</text>
+      <g><circle cx="40" cy="176" r="6" fill="#7fd0c2"/><circle cx="64" cy="176" r="6" fill="#7fd0c2"/><circle cx="88" cy="176" r="6" fill="#7fd0c2"/><circle cx="52" cy="196" r="6" fill="#f0868a"/><circle cx="76" cy="196" r="6" fill="#7fd0c2"/></g>
+      <line x1="110" y1="186" x2="150" y2="186" stroke="#6d7787" stroke-width="1.6" marker-end="url(#g1)"/>
+      <rect x="156" y="164" width="260" height="46" rx="8" fill="#26131A" stroke="#f0868a"/>
+      <text x="170" y="184" font-family="Inter, sans-serif" font-size="11" fill="#f7999b">1 incident — analyst triages, closes</text>
+      <text x="170" y="200" font-family="Inter, sans-serif" font-size="10" fill="#f0868a">a 2nd, different attack (red) hidden inside</text>
+
+      <!-- STORY -->
+      <text x="480" y="34" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#8fc0ff">★ ASSEMBLE THE STORY — best</text>
+      <g font-family="Inter, sans-serif" font-size="10">
+        <rect x="480" y="48" width="150" height="30" rx="6" fill="#1c222b" stroke="#5ea1ff"/><text x="490" y="67" fill="#cdd6e3">AiTM sign-in rule</text>
+        <rect x="480" y="84" width="150" height="30" rx="6" fill="#1c222b" stroke="#5ea1ff"/><text x="490" y="103" fill="#cdd6e3">inbox-rule created</text>
+        <rect x="480" y="120" width="150" height="30" rx="6" fill="#1c222b" stroke="#5ea1ff"/><text x="490" y="139" fill="#cdd6e3">mass-mail sent</text>
+      </g>
+      <path d="M630 63 C690 63 700 96 730 96" fill="none" stroke="#5ea1ff" stroke-width="1.6"/>
+      <path d="M630 99 L730 99" fill="none" stroke="#5ea1ff" stroke-width="1.6"/>
+      <path d="M630 135 C690 135 700 102 730 102" fill="none" stroke="#5ea1ff" stroke-width="1.6"/>
+      <rect x="734" y="72" width="150" height="54" rx="8" fill="#12201f" stroke="#7fd0c2"/>
+      <text x="809" y="94" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#7fd0c2">1 incident</text>
+      <text x="809" y="110" text-anchor="middle" font-family="Inter, sans-serif" font-size="9.5" fill="#aab3c0">3 rules · one mailbox</text>
+      <text x="809" y="122" text-anchor="middle" font-family="Inter, sans-serif" font-size="9.5" fill="#6d7787">= one attack</text>
+
+      <text x="480" y="188" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0" >Different rules, same actor, one window →</text>
+      <text x="480" y="205" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">assembled into a timeline, not scattered.</text>
+
+      <line x1="24" y1="238" x2="876" y2="238" stroke="#232a33"/>
+      <text x="24" y="266" font-family="Inter, sans-serif" font-size="12" fill="#e8ebf0">Group by <tspan fill="#8fc0ff" font-family="JetBrains Mono, monospace" font-size="11">entity</tspan> for a per-victim story; by <tspan fill="#8fc0ff" font-family="JetBrains Mono, monospace" font-size="11">rule</tspan> to collapse a burst.</text>
+      <text x="24" y="288" font-family="Inter, sans-serif" font-size="12" fill="#aab3c0">Group aggressively enough to kill duplicates —</text>
+      <text x="24" y="306" font-family="Inter, sans-serif" font-size="12" fill="#aab3c0">never so broadly that a distinct attack hides in a case someone already looked at.</text>
+    </svg>
+    <figcaption><b>"Similar" is doing enormous work in "group similar alerts."</b> Under-group and you drown in duplicates; over-group and a second, different attack rides inside an incident the analyst has already mentally closed. The best incidents pull <b>different</b> rules on <b>one</b> actor into a single timeline.</figcaption>
+  </figure>
+
+  <h2 class="head"><span class="num">05</span>Hunting: the questions you didn't know to ask</h2>
+  <p class="sub">Rules catch attacks you predicted. Hunting is for the ones you didn't — and it's the R&amp;D that feeds your detections.</p>
+
+  <p>An analytics rule can only fire on a pattern you already described. Hunting inverts that: you form a hypothesis ("if an attacker were living off the land here, what would it look like?"), run the query once against history, and chase the hunch. The part that closes the loop — and the reason hunting isn't just ad-hoc querying — is that <strong>a hunt which finds something real graduates into a scheduled rule.</strong> Hunting is where new detections are born.</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 900 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The hunt-to-rule loop: hypothesis, hunt over history, if it finds something real, promote it into a scheduled analytics rule that then runs continuously.">
+      <defs><marker id="h1" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#5ea1ff"/></marker>
+      <marker id="h2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#f2d45c"/></marker></defs>
+      <g font-family="Inter, sans-serif" font-size="11">
+        <rect x="20" y="46" width="150" height="52" rx="8" fill="#1c222b" stroke="#2f3742"/><text x="95" y="70" text-anchor="middle" fill="#e8ebf0">Hypothesis</text><text x="95" y="86" text-anchor="middle" font-size="9.5" fill="#6d7787">"what would X look like?"</text>
+        <line x1="170" y1="72" x2="206" y2="72" stroke="#5ea1ff" stroke-width="2" marker-end="url(#h1)"/>
+        <rect x="210" y="46" width="170" height="52" rx="8" fill="#0d1a26" stroke="#4a7fd0"/><text x="295" y="70" text-anchor="middle" fill="#8fc0ff">Hunt over history</text><text x="295" y="86" text-anchor="middle" font-size="9.5" fill="#aab3c0">run once, look back far</text>
+        <line x1="380" y1="72" x2="416" y2="72" stroke="#5ea1ff" stroke-width="2" marker-end="url(#h1)"/>
+        <rect x="420" y="46" width="150" height="52" rx="8" fill="#1c222b" stroke="#2f3742"/><text x="495" y="70" text-anchor="middle" fill="#e8ebf0">Found something?</text><text x="495" y="86" text-anchor="middle" font-size="9.5" fill="#6d7787">real, repeatable pattern</text>
+        <line x1="570" y1="72" x2="606" y2="72" stroke="#f2d45c" stroke-width="2" marker-end="url(#h2)"/>
+        <rect x="610" y="40" width="170" height="64" rx="8" fill="#241f0c" stroke="#f2d45c"/><text x="695" y="66" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#f2d45c">SCHEDULED RULE</text><text x="695" y="84" text-anchor="middle" font-size="9.5" fill="#aab3c0">now runs continuously</text>
+      </g>
+    </svg>
+    <figcaption><b>Hunt → confirm → promote.</b> The loop is what makes hunting compound: every good hunt permanently widens your automated coverage instead of being a one-off search you forget.</figcaption>
+  </figure>
+
+  <p>When a hunt outgrows KQL — you need Python, a library, an ML model, or a graph you can't draw in a workbook — that's what <strong>notebooks</strong> are for: Jupyter notebooks you drive cell by cell. Two honest caveats: a notebook is a <em>power tool you steer</em>, not an agent that investigates for you; and it needs its own compute — you attach it to a separate <strong>Azure Machine Learning workspace</strong> (distinct from your Log Analytics workspace), which carries setup and cost. It's the specialist's instrument, used deliberately and rarely — not the daily driver.</p>
+
+  <h2 class="head"><span class="num">06</span>Entity behaviour: from "what fired" to "who's involved"</h2>
+  <p class="sub">Mid-incident, the useful pivot isn't another query — it's a single screen that assembles everything tied to one actor.</p>
+
+  <p>The <strong>entity page</strong> takes a user, host, or IP and pulls together everything about it — incidents, alerts, sign-ins, an activity timeline — on one screen. It flips the axis of investigation from "what did this <em>rule</em> catch" to "what is <em>this user</em> doing," which is exactly the move you want once an alert points at someone. Underneath it, optionally, is <strong>UEBA</strong> (User and Entity Behaviour Analytics) — the ML baselining that flags "this account is acting anomalously versus its own history" and writes its own signal for the entity pages to surface. The entity page is always useful; UEBA is the optional engine that enriches it, and it carries cost — so it's a switch you flip deliberately, not a default.</p>
+
+  <div class="takeaway">
+    <p class="tag">The one-line model</p>
+    <p>Rules are known-question detection, hunting is unknown-question discovery, and entity pages are the pivot from "what fired" to "who's involved." Three stances toward the same data — and the rule is never just its KQL.</p>
+  </div>
+
+  <h2 class="head"><span class="num">07</span>Next: making it act</h2>
+  <p>Detection ends with an incident sitting in a queue — accurately built, correctly grouped, ready for a human. But a well-made incident still hasn't <em>done</em> anything. Part 3 is response: automation rules and playbooks, the reflex and the muscle — including the single highest-leverage automation in a SOC, and the one place you should absolutely keep a human on the trigger.</p>
+
+  <div class="sources"><h2>Sources &amp; further reading</h2><ul>
+    <li><a href="https://learn.microsoft.com/en-us/azure/sentinel/detect-threats-built-in">Detect threats with built-in analytics rules</a><span>templates, rule types, and enabling detections</span></li>
+    <li><a href="https://learn.microsoft.com/en-us/azure/sentinel/detect-threats-custom">Create custom analytics rules</a><span>query, scheduling, entity mapping, and alert grouping</span></li>
+    <li><a href="https://learn.microsoft.com/en-us/azure/sentinel/hunting">Threat hunting in Microsoft Sentinel</a><span>hypothesis-driven hunting and promoting hunts to rules</span></li>
+    <li><a href="https://learn.microsoft.com/en-us/azure/sentinel/watchlists">Watchlists</a><span>reference data for enrichment and allowlisting</span></li>
+    <li><a href="https://learn.microsoft.com/en-us/azure/sentinel/identify-threats-with-entity-behavior-analytics">Entity behaviour analytics (UEBA)</a><span>entity pages and behavioural baselining</span></li>
+  </ul></div>
+
+</div>
+</article>
+
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Ram Mudigina · Blue Team of One</span>
+    <span><a href="/index.html">Home</a> · <a href="/about.html">About</a></span>
+  </div>
+</footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>

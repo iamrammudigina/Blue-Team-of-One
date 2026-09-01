@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentinel, end to end — Detection Engineering — Blue Team of One</title>
+<meta name="description" content="A three-part series on Microsoft Sentinel as a platform — the data foundation, detection, and response — built from the ground up and best read in order.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=29">
+</head>
+<body>
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/" aria-current="page">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="wrap">
+    <div class="phead">
+      <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/detection/">Detection Engineering</a><span class="sep">›</span><span>Sentinel, end to end</span></p>
+      <p class="kicker">Series</p>
+      <h1>Sentinel, end to end</h1>
+      <p class="tagline">Microsoft Sentinel as a platform, built from the ground up — the data foundation, detection, and response. Three parts, best read in order. Every piece is one trade between coverage, speed, and cost.</p>
+    </div>
+    <div class="plist">
+      <a class="prow" href="/posts/sentinel-siem-architecture.html">
+        <div class="meta"><span class="fmt deep">Part 1 · Deep dive</span><span class="date">September 1, 2026</span></div>
+        <h3>How Sentinel is built: from the loading dock to the lake</h3>
+        <p>The data foundation — subscription and workspace, RBAC, the Defender portal, connectors and DCRs, table tiers and retention, and the data lake economics that quietly decide your bill.</p>
+        <span class="more">Read →</span>
+      </a>
+      <a class="prow" href="/posts/sentinel-detection-rules-incidents.html">
+        <div class="meta"><span class="fmt deep">Part 2 · Deep dive</span><span class="date">September 1, 2026</span></div>
+        <h3>How Sentinel detects: rules, alerts, incidents, and the hunt</h3>
+        <p>Turning tables into a SIEM — analytics rules (templates vs custom, and why a rule is more than its KQL), rule types, watchlists, the alert-to-incident chain and honest grouping, hunting, notebooks, and entity behaviour.</p>
+        <span class="more">Read →</span>
+      </a>
+      <a class="prow" href="/posts/sentinel-response-automation-playbooks.html">
+        <div class="meta"><span class="fmt deep">Part 3 · Deep dive</span><span class="date">September 1, 2026</span></div>
+        <h3>How Sentinel responds: the reflex and the muscle</h3>
+        <p>Turning incidents into action — automation rules vs playbooks (Logic Apps), auto-enrichment as the highest-leverage automation, remediation, and where to keep a human on the trigger.</p>
+        <span class="more">Read →</span>
+      </a>
+    </div>
+  </div>
+</main>
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/about.html">About</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>

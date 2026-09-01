@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How Microsoft Sentinel is built: from the loading dock to the lake — Blue Team of One</title>
+<meta name="description" content="A diagram-led walk through the Microsoft Sentinel data foundation — subscription and workspace, RBAC, the Defender portal, connectors and DCRs, table tiers and retention, and the data lake economics. Part 1 of a SIEM series.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=29">
+<style>
+  /* scoped diagram styling — figures aren't styled globally */
+  figure.diagram{margin:30px 0; padding:0}
+  figure.diagram svg{display:block; width:100%; height:auto;
+    background:#12161c; border:1px solid #232a33; border-radius:10px}
+  figure.diagram figcaption{margin-top:10px; font-family:var(--mono); font-size:12.5px;
+    color:var(--ink-3); line-height:1.5}
+  figure.diagram figcaption b{color:var(--ink-2)}
+  .routebox{border:1px solid var(--line); border-radius:8px; background:var(--bg-2);
+    padding:4px 18px; margin:26px 0}
+  .routebox li{margin:12px 0; color:var(--ink-2)}
+  .routebox b{color:var(--ink)}
+  .series-nav{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:2px 0 24px; font-family:var(--mono); font-size:12.5px}
+  .series-nav .lab{color:var(--ink-3); text-transform:uppercase; letter-spacing:.05em; margin-right:6px}
+  .series-nav a,.series-nav .cur{padding:5px 11px; border-radius:6px; border:1px solid var(--line); color:var(--ink-2); text-decoration:none}
+  .series-nav a:hover{border-color:var(--accent-dim); color:var(--ink)}
+  .series-nav .cur{background:var(--signal-bg); border-color:var(--accent); color:var(--accent)}
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Blue Team <b>of One</b></span>
+      <span class="tag">field notes · security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/detection/">Detection Engineering</a><span class="sep">›</span><a href="/detection/sentinel-platform.html">Sentinel, end to end</a></p>
+    <p class="eyebrow"><span class="dot"></span>SIEM architecture · part 1 of a series</p>
+    <h1>How Sentinel is built: <em>from the loading dock to the lake</em></h1>
+    <p class="lede">Most people meet Microsoft Sentinel as a search bar over some logs. Underneath is a supply chain — data arrives, gets sorted, gets stored at a price that depends on how you'll use it. This is that chain, drawn out end to end: subscription and workspace, RBAC, the Defender portal, connectors and DCRs, table tiers and retention, and the data lake economics that quietly decide your bill.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>September 1, 2026</span>
+      <span>~14 min read · foundations</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+      <nav class="series-nav" aria-label="Series navigation"><span class="lab">Series · Sentinel, end&nbsp;to&nbsp;end</span><span class="cur" aria-current="page">1 · Foundation</span><a href="/posts/sentinel-detection-rules-incidents.html">2 · Detection</a><a href="/posts/sentinel-response-automation-playbooks.html">3 · Response</a></nav>
+
+  <p>A SIEM has one job: take everything your environment emits — sign-ins, endpoint events, mail flow, firewall traffic — and turn that raw noise into a small number of things a human should look at. Collect, correlate, alert, retain. Sentinel is Microsoft's cloud-native take on that job, and the reason it's worth understanding as <em>architecture</em> rather than as a product tour is that every meaningful decision you make with it is a trade between three things that pull against each other: <strong>coverage</strong> (keep everything), <strong>speed</strong> (query it instantly), and <strong>cost</strong> (don't go bankrupt). Almost everything below is a mechanism for spending on two of those without wasting the third.</p>
+
+  <div class="analogy">
+    <p class="tag">Mental model</p>
+    <p>Think of Sentinel as a warehouse operation, not a database. Connectors are the loading docks. A sorting line (the DCR) decides what comes off the truck and where it goes. Tables are the labelled aisles. The tiers are storage classes — a climate-controlled front room you pay a premium for, cheaper back-shelves, and a vast low-cost depot out back. Retention is how long before a pallet is shredded. Get the routing right and the warehouse is cheap and fast; get it wrong and you're paying front-room rates to store junk you'll never pick.</p>
+  </div>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 960 486" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="End-to-end Sentinel pipeline: sources feed connectors and a DCR, which write to tables in a Log Analytics workspace across the Analytics and Basic/Auxiliary tiers, all mirrored to the Sentinel data lake, with the whole thing managed from the Microsoft Defender portal.">
+      <defs>
+        <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#5ea1ff"/></marker>
+        <marker id="ahg" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#6fd08c"/></marker>
+      </defs>
+      <!-- roof -->
+      <rect x="10" y="10" width="940" height="466" rx="12" fill="none" stroke="#2f3742" stroke-dasharray="5 5"/>
+      <text x="28" y="35" font-family="JetBrains Mono, monospace" font-size="12.5" font-weight="700" fill="#aab3c0" letter-spacing=".05em">MICROSOFT DEFENDER PORTAL · unified SecOps</text>
+      <text x="932" y="35" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="#6d7787">Azure portal for Sentinel retiring ~Jul 2026</text>
+
+      <!-- sources -->
+      <text x="42" y="76" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#6d7787" letter-spacing=".08em">SOURCES</text>
+      <g font-family="Inter, sans-serif" font-size="12.5" fill="#e8ebf0">
+        <rect x="36" y="86" width="150" height="40" rx="6" fill="#1c222b" stroke="#2f3742"/><text x="111" y="111" text-anchor="middle">M365 · Entra ID</text>
+        <rect x="36" y="134" width="150" height="40" rx="6" fill="#1c222b" stroke="#2f3742"/><text x="111" y="159" text-anchor="middle">Defender XDR</text>
+        <rect x="36" y="182" width="150" height="40" rx="6" fill="#1c222b" stroke="#2f3742"/><text x="111" y="201" text-anchor="middle" font-size="11.5">Firewall · Proxy · DNS</text>
+        <rect x="36" y="230" width="150" height="40" rx="6" fill="#1c222b" stroke="#2f3742"/><text x="111" y="255" text-anchor="middle" font-size="11.5">Custom app · OT · syslog</text>
+      </g>
+
+      <!-- arrow sources -> DCR -->
+      <line x1="188" y1="178" x2="224" y2="178" stroke="#5ea1ff" stroke-width="2" marker-end="url(#ah)"/>
+
+      <!-- DCR -->
+      <rect x="228" y="110" width="158" height="136" rx="10" fill="#161b22" stroke="#5ea1ff" stroke-width="1.6"/>
+      <text x="307" y="140" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12.5" font-weight="700" fill="#8fc0ff">CONNECTORS + DCR</text>
+      <text x="307" y="164" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" fill="#aab3c0">filter · shape · route</text>
+      <text x="307" y="182" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#6d7787">at ingest —</text>
+      <text x="307" y="198" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#6d7787">before you're billed</text>
+      <path d="M268 214 h78 l-20 22 v14 h-38 v-14 z" fill="none" stroke="#5ea1ff" stroke-width="1.3" opacity=".7"/>
+
+      <!-- arrow DCR -> workspace -->
+      <line x1="388" y1="150" x2="436" y2="150" stroke="#5ea1ff" stroke-width="2" marker-end="url(#ah)"/>
+
+      <!-- workspace -->
+      <rect x="440" y="70" width="486" height="214" rx="10" fill="#12161c" stroke="#2f3742"/>
+      <text x="456" y="92" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="#aab3c0" letter-spacing=".04em">LOG ANALYTICS WORKSPACE</text>
+      <text x="456" y="114" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#6d7787">tables</text>
+      <g font-family="JetBrains Mono, monospace" font-size="10.5" fill="#cdd6e3">
+        <rect x="456" y="122" width="112" height="28" rx="5" fill="#1c222b" stroke="#2f3742"/><text x="512" y="140" text-anchor="middle">SigninLogs</text>
+        <rect x="576" y="122" width="120" height="28" rx="5" fill="#1c222b" stroke="#2f3742"/><text x="636" y="140" text-anchor="middle">SecurityEvent</text>
+        <rect x="704" y="122" width="150" height="28" rx="5" fill="#1c222b" stroke="#2f3742"/><text x="779" y="140" text-anchor="middle">DeviceProcessEvents</text>
+        <rect x="456" y="156" width="112" height="28" rx="5" fill="#12201f" stroke="#5ea1ff"/><text x="512" y="174" text-anchor="middle" fill="#8fc0ff">MyApp_CL</text>
+        <text x="588" y="174" font-size="10" fill="#6d7787">← custom table</text>
+      </g>
+      <!-- tier lanes -->
+      <rect x="456" y="200" width="220" height="66" rx="7" fill="#241f0c" stroke="#f2d45c"/>
+      <text x="466" y="220" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#f2d45c">ANALYTICS TIER · hot</text>
+      <text x="466" y="238" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">full KQL · powers rules,</text>
+      <text x="466" y="254" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">alerts &amp; hunting · $$$</text>
+      <rect x="688" y="200" width="222" height="66" rx="7" fill="#12201f" stroke="#7fd0c2"/>
+      <text x="698" y="220" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#7fd0c2">BASIC / AUXILIARY · warm</text>
+      <text x="698" y="238" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">cheaper ingest · limited</text>
+      <text x="698" y="254" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">KQL · per-query scan · $</text>
+
+      <!-- data lake band -->
+      <rect x="36" y="356" width="874" height="104" rx="10" fill="#0d1a26" stroke="#4a7fd0"/>
+      <text x="54" y="384" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#8fc0ff" letter-spacing=".03em">MICROSOFT SENTINEL DATA LAKE · cold</text>
+      <text x="54" y="406" font-family="Inter, sans-serif" font-size="12" fill="#aab3c0">low-cost · up to 12 years · 6:1 compression · open Delta Parquet</text>
+      <text x="54" y="426" font-family="Inter, sans-serif" font-size="12" fill="#6d7787">query by KQL job or notebook — not available to real-time rules</text>
+
+      <!-- mirror arrow (analytics -> lake) -->
+      <line x1="566" y1="266" x2="566" y2="352" stroke="#6fd08c" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ahg)"/>
+      <rect x="582" y="296" width="118" height="30" rx="5" fill="#0f1216" stroke="#2f3742"/>
+      <text x="641" y="315" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#8fdca4">mirror · free</text>
+
+      <!-- lake-direct arrow (DCR -> lake) -->
+      <path d="M300 246 C300 320 210 320 210 352" fill="none" stroke="#5ea1ff" stroke-width="2" marker-end="url(#ah)"/>
+      <rect x="120" y="300" width="120" height="30" rx="5" fill="#0f1216" stroke="#2f3742"/>
+      <text x="180" y="319" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#8fc0ff">lake-direct</text>
+    </svg>
+    <figcaption><b>The whole pipeline on one screen.</b> Everything after this is a zoom into one region of this map. Data enters through connectors, gets shaped by a DCR, lands in tables that each carry a tier, and is mirrored down into the lake — all administered from the Defender portal.</figcaption>
+  </figure>
+
+  <h2 class="head"><span class="num">01</span>Standing it up</h2>
+  <p class="sub">The order matters: two of these steps are effectively permanent, and the vendor quickstart front-loads the fun one and leaves the dangerous ones implied.</p>
+
+  <p>Sentinel isn't a resource you deploy so much as a capability you switch on <em>over</em> a <strong>Log Analytics workspace</strong>, which itself lives inside an active <strong>Azure subscription</strong>. That one fact drives most early mistakes, because a workspace is an Azure Monitor object first and a security object second — design it for the wrong master and you inherit its billing, retention, and access model for years.</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 920 176" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Setup chain in six steps: Azure subscription, dedicated Log Analytics workspace, enable Sentinel, attach to the Defender portal, scope RBAC to the resource group with Sentinel roles, then connectors and Content Hub.">
+      <defs><marker id="s1" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#5ea1ff"/></marker></defs>
+      <g font-family="Inter, sans-serif">
+        <!-- nodes -->
+        <g>
+          <rect x="14" y="46" width="128" height="80" rx="9" fill="#1c222b" stroke="#2f3742"/>
+          <circle cx="30" cy="62" r="12" fill="#5ea1ff"/><text x="30" y="66" text-anchor="middle" font-size="12" font-weight="700" fill="#0a1220">1</text>
+          <text x="78" y="88" text-anchor="middle" font-size="12" fill="#e8ebf0">Azure</text>
+          <text x="78" y="104" text-anchor="middle" font-size="12" fill="#e8ebf0">subscription</text>
+        </g>
+        <g>
+          <rect x="160" y="46" width="128" height="80" rx="9" fill="#1c222b" stroke="#2f3742"/>
+          <circle cx="176" cy="62" r="12" fill="#5ea1ff"/><text x="176" y="66" text-anchor="middle" font-size="12" font-weight="700" fill="#0a1220">2</text>
+          <text x="224" y="84" text-anchor="middle" font-size="11.5" fill="#e8ebf0">Dedicated Log</text>
+          <text x="224" y="99" text-anchor="middle" font-size="11.5" fill="#e8ebf0">Analytics</text>
+          <text x="224" y="114" text-anchor="middle" font-size="11.5" fill="#e8ebf0">workspace</text>
+        </g>
+        <g>
+          <rect x="306" y="46" width="128" height="80" rx="9" fill="#1c222b" stroke="#2f3742"/>
+          <circle cx="322" cy="62" r="12" fill="#5ea1ff"/><text x="322" y="66" text-anchor="middle" font-size="12" font-weight="700" fill="#0a1220">3</text>
+          <text x="370" y="92" text-anchor="middle" font-size="11.5" fill="#e8ebf0">Enable</text>
+          <text x="370" y="107" text-anchor="middle" font-size="11.5" fill="#e8ebf0">Sentinel</text>
+        </g>
+        <g>
+          <rect x="452" y="46" width="128" height="80" rx="9" fill="#161b22" stroke="#5ea1ff"/>
+          <circle cx="468" cy="62" r="12" fill="#5ea1ff"/><text x="468" y="66" text-anchor="middle" font-size="12" font-weight="700" fill="#0a1220">4</text>
+          <text x="516" y="92" text-anchor="middle" font-size="11.5" fill="#8fc0ff">Attach to</text>
+          <text x="516" y="107" text-anchor="middle" font-size="11.5" fill="#8fc0ff">Defender portal</text>
+        </g>
+        <g>
+          <rect x="598" y="46" width="128" height="80" rx="9" fill="#241f0c" stroke="#f2d45c"/>
+          <circle cx="614" cy="62" r="12" fill="#f2d45c"/><text x="614" y="66" text-anchor="middle" font-size="12" font-weight="700" fill="#0a1220">5</text>
+          <text x="662" y="84" text-anchor="middle" font-size="11.5" fill="#f2d45c">Scope RBAC</text>
+          <text x="662" y="99" text-anchor="middle" font-size="10.5" fill="#aab3c0">resource group ·</text>
+          <text x="662" y="113" text-anchor="middle" font-size="10.5" fill="#aab3c0">Sentinel roles</text>
+        </g>
+        <g>
+          <rect x="744" y="46" width="128" height="80" rx="9" fill="#1c222b" stroke="#2f3742"/>
+          <circle cx="760" cy="62" r="12" fill="#5ea1ff"/><text x="760" y="66" text-anchor="middle" font-size="12" font-weight="700" fill="#0a1220">6</text>
+          <text x="808" y="84" text-anchor="middle" font-size="11.5" fill="#e8ebf0">Connectors</text>
+          <text x="808" y="99" text-anchor="middle" font-size="11.5" fill="#e8ebf0">+ Content</text>
+          <text x="808" y="113" text-anchor="middle" font-size="11.5" fill="#e8ebf0">Hub</text>
+        </g>
+        <!-- arrows -->
+        <g stroke="#5ea1ff" stroke-width="2" marker-end="url(#s1)">
+          <line x1="142" y1="86" x2="158" y2="86"/><line x1="288" y1="86" x2="304" y2="86"/>
+          <line x1="434" y1="86" x2="450" y2="86"/><line x1="580" y1="86" x2="596" y2="86"/>
+          <line x1="726" y1="86" x2="742" y2="86"/>
+        </g>
+        <!-- notes -->
+        <text x="224" y="150" text-anchor="middle" font-size="10.5" fill="#f0868a">region ≈ permanent — the lake must match it</text>
+        <text x="662" y="150" text-anchor="middle" font-size="10.5" fill="#f0868a">not subscription-wide</text>
+        <text x="14" y="26" font-size="11" font-family="JetBrains Mono, monospace" font-weight="700" fill="#6d7787" letter-spacing=".06em">SETUP CHAIN</text>
+      </g>
+    </svg>
+    <figcaption><b>Two of these are near-irreversible.</b> Workspace <b>topology</b> and <b>region</b> (step 2) you live with for years — migration is an export-and-rebuild, and the data lake must sit in the same region as its primary workspace. RBAC (step 5) is part of setup, not a hardening pass you circle back to.</figcaption>
+  </figure>
+
+  <p>The step people skip conceptually is <strong>4 — the Defender attach.</strong> As of 2026 the management experience lives in the Microsoft Defender portal (unified SecOps), and the standalone Azure-portal experience for Sentinel is being retired around July 2026. So a complete build is now two onboardings: stand up the workspace, then connect it to Defender. Teach it workspace-first and you're anchoring on "a SIEM you later connect to Defender"; the reverse framing is coming, but for now the honest order is workspace, then attach.</p>
+
+  <div class="caveat">
+    <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+    <div><h3>Scope RBAC to the resource group, not the subscription</h3><p>The common miss: people lean on subscription-level Owner/Contributor, and suddenly anyone who administers <em>anything</em> in that subscription can read the security logs. Put the workspace in its own resource group, scope there, and reach for the <strong>Sentinel-specific roles</strong> (Reader / Responder / Contributor) — "can triage an incident" should never require "can delete the workspace." At an MSSP a scoping error crosses a client boundary, which is why this belongs in setup, not later.</p></div>
+  </div>
+
+  <h2 class="head"><span class="num">02</span>Getting data in — and shaping it before you pay</h2>
+  <p class="sub">Connectors are the intake. The DCR is the sorting line — and it runs before the meter does.</p>
+
+  <p>Out-of-the-box <strong>data connectors</strong> pull from M365, Entra ID, Defender XDR, AWS/GCP, and syslog/CEF; anything bespoke comes in through the Logs Ingestion API or the Codeless Connector Platform. But the connector is just the dock. The piece that earns its keep is the <strong>Data Collection Rule (DCR)</strong> — a transformation and routing layer that runs <em>at ingest, before the data is written and billed.</em> It does two separable jobs: <strong>shape</strong> (drop noisy rows, trim or redact columns, enrich) and <strong>route</strong> (send the result to the right table — including a <strong>custom <span class="k">_CL</span> table</strong> when the data doesn't fit a built-in schema).</p>
+
+<pre class="code"><span class="muted">// a DCR transform is just KQL over the incoming stream, aliased 'source'</span>
+source
+| where not(EventID in (4662, 5145))          <span class="muted">// drop known-noisy events at ingest</span>
+| project-away DebugBlob, RawXml               <span class="muted">// trim columns you'll never hunt on</span>
+<span class="muted">// what survives here is what you pay to ingest, retain, and mirror</span></pre>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 900 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A DCR sorting line: a raw stream enters, low-value rows are dropped and never billed, and the survivors split — high-signal data to the Analytics tier, high-volume data straight to the data lake.">
+      <defs>
+        <marker id="d1" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#5ea1ff"/></marker>
+        <marker id="d2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#f2d45c"/></marker>
+        <marker id="d3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#f0868a"/></marker>
+      </defs>
+      <!-- raw stream -->
+      <text x="24" y="40" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#6d7787" letter-spacing=".06em">RAW STREAM</text>
+      <g stroke="#6d7787" stroke-width="3" opacity=".85">
+        <line x1="24" y1="132" x2="150" y2="132"/><line x1="24" y1="120" x2="150" y2="120"/>
+        <line x1="24" y1="144" x2="150" y2="144"/><line x1="24" y1="156" x2="150" y2="156"/>
+        <line x1="24" y1="108" x2="150" y2="108"/>
+      </g>
+      <!-- DCR gate -->
+      <line x1="150" y1="132" x2="196" y2="132" stroke="#5ea1ff" stroke-width="2" marker-end="url(#d1)"/>
+      <rect x="200" y="86" width="150" height="96" rx="10" fill="#161b22" stroke="#5ea1ff" stroke-width="1.6"/>
+      <text x="275" y="120" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700" fill="#8fc0ff">DCR</text>
+      <text x="275" y="140" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">transform at ingest</text>
+      <text x="275" y="157" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" fill="#6d7787">(before billing)</text>
+      <!-- dropped -->
+      <path d="M300 182 C300 226 240 226 220 240" fill="none" stroke="#f0868a" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#d3)"/>
+      <text x="150" y="258" font-family="Inter, sans-serif" font-size="11.5" fill="#f0868a">dropped — never billed,</text>
+      <text x="150" y="273" font-family="Inter, sans-serif" font-size="11.5" fill="#f0868a">never recoverable</text>
+      <!-- split up: analytics -->
+      <path d="M350 116 C420 116 430 84 496 84" fill="none" stroke="#f2d45c" stroke-width="2" marker-end="url(#d2)"/>
+      <rect x="500" y="60" width="368" height="48" rx="8" fill="#241f0c" stroke="#f2d45c"/>
+      <text x="516" y="80" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#f2d45c">ANALYTICS TIER</text>
+      <text x="516" y="97" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">high-signal → hot, real-time, drives detections</text>
+      <!-- split down: lake -->
+      <path d="M350 150 C420 150 430 182 496 182" fill="none" stroke="#5ea1ff" stroke-width="2" marker-end="url(#d1)"/>
+      <rect x="500" y="158" width="368" height="48" rx="8" fill="#0d1a26" stroke="#4a7fd0"/>
+      <text x="516" y="178" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#8fc0ff">DATA LAKE TIER</text>
+      <text x="516" y="195" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">high-volume → cold, cheap, kept for forensics</text>
+    </svg>
+    <figcaption><b>The split at ingest.</b> A newer DCR capability routes the same stream two ways — the high-signal slice to Analytics, the high-volume remainder straight to the lake. This is the mechanism that makes "keep everything, but not everything hot" actually executable.</figcaption>
+  </figure>
+
+  <div class="caveat">
+    <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+    <div><h3>DCR filtering is the one irreversible knob</h3><p>Retention answers "how long do I keep this row." DCR filtering answers "do I ever <em>have</em> it." Drop a field at the DCR and it was never written — no restore, no search job, nothing, because it never existed in storage. Filtering obvious junk is free money; over-filter and you've deleted the one column a future investigation needed. Treat "shape at ingest" as a decision you can't take back.</p></div>
+  </div>
+
+  <h2 class="head"><span class="num">03</span>Where it lives: tables, tiers, and retention</h2>
+  <p class="sub">Every source writes to tables. Each table carries a plan that sets its cost, its query power, and the ceiling on how long you can keep it — and you set those per table, not once for the whole workspace.</p>
+
+  <p>The nuance worth stating precisely, because a lot of write-ups blur it: the <strong>tier</strong> and the <strong>retention period</strong> are related but separate knobs. The tier sets the rules of the game — cost, which KQL you can run, how fast, and the retention floor and ceiling. Retention is a value you then dial: a workspace-wide default, overridden per table. High-value detection tables stay Analytics with long interactive retention; a huge low-value table you keep only for compliance goes Basic or Auxiliary and ages out cheaply into long-term storage. Same workspace, different economics per table.</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 900 322" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A ladder of table tiers from hot to cold: Analytics, Basic, Auxiliary, long-term archive, and the data lake, trading query power and speed for cost as you descend.">
+      <text x="24" y="30" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#f2d45c" letter-spacing=".05em">HOT — fast · expensive · real-time</text>
+      <text x="876" y="30" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="#6d7787">cost ↓   queryability ↓</text>
+      <!-- Analytics -->
+      <rect x="24" y="42" width="852" height="46" rx="7" fill="#241f0c" stroke="#f2d45c"/>
+      <text x="40" y="62" font-family="JetBrains Mono, monospace" font-size="12.5" font-weight="700" fill="#f2d45c">ANALYTICS</text>
+      <text x="40" y="79" font-family="Inter, sans-serif" font-size="11.5" fill="#aab3c0">full KQL · powers analytics rules &amp; hunting · 90-day interactive, extend to 2 yrs</text>
+      <text x="860" y="70" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="14" fill="#f2d45c">$$$</text>
+      <!-- Basic -->
+      <rect x="70" y="96" width="806" height="42" rx="7" fill="#12201f" stroke="#7fd0c2"/>
+      <text x="86" y="114" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="#7fd0c2">BASIC</text>
+      <text x="86" y="130" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">reduced KQL (no join/union/summarize) · per-query scan · 30-day interactive</text>
+      <text x="860" y="122" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="13" fill="#7fd0c2">$$</text>
+      <!-- Auxiliary -->
+      <rect x="116" y="146" width="760" height="42" rx="7" fill="#12201f" stroke="#5f9e94"/>
+      <text x="132" y="164" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="#8fd0c4">AUXILIARY</text>
+      <text x="132" y="180" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">low-touch / compliance · single-table unoptimized KQL · 30-day interactive</text>
+      <text x="860" y="172" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="13" fill="#8fd0c4">$</text>
+      <!-- Archive -->
+      <rect x="162" y="196" width="714" height="42" rx="7" fill="#171b22" stroke="#6d7787"/>
+      <text x="178" y="214" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="#9aa6b8">LONG-TERM (archive)</text>
+      <text x="178" y="230" font-family="Inter, sans-serif" font-size="11" fill="#8794a6">not interactive — Search Jobs or Restore to read · up to 12 yrs</text>
+      <text x="860" y="222" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="12" fill="#9aa6b8">¢</text>
+      <!-- Data lake -->
+      <rect x="208" y="246" width="668" height="46" rx="7" fill="#0d1a26" stroke="#4a7fd0"/>
+      <text x="224" y="266" font-family="JetBrains Mono, monospace" font-size="12.5" font-weight="700" fill="#8fc0ff">DATA LAKE</text>
+      <text x="224" y="283" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">KQL jobs &amp; notebooks · 6:1 compression · up to 12 yrs · not real-time</text>
+      <text x="860" y="274" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="12" fill="#8fc0ff">¢</text>
+      <text x="24" y="312" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#8fc0ff" letter-spacing=".05em">COLD — slow · cheap · retention</text>
+    </svg>
+    <figcaption><b>The ladder.</b> As you descend you trade query power and speed for cost. The art of a cheap, effective Sentinel is putting each table on the lowest rung that still lets you do the job that table exists for.</figcaption>
+  </figure>
+
+  <table class="cmp">
+    <tr><th>Tier</th><th>Query power</th><th>Interactive retention</th><th>Cost profile</th><th>Put here</th></tr>
+    <tr><td><strong>Analytics</strong></td><td>Full KQL; drives rules, alerts, hunting; real-time</td><td>90 days with Sentinel; extend to 2 yrs</td><td>Premium ingest + priciest retention</td><td>Auth, EDR/XDR alerts, TI — anything a rule reads</td></tr>
+    <tr><td><strong>Basic</strong></td><td>Reduced KQL (no join/union/summarize); per-GB query scan</td><td>30 days</td><td>Low ingest; pay per query</td><td>High-volume logs you rarely touch but may need</td></tr>
+    <tr><td><strong>Auxiliary</strong></td><td>Single-table, unoptimized KQL; per-GB scan</td><td>30 days</td><td>Lowest ingest + cheap retention</td><td>Verbose / compliance / low-touch logs</td></tr>
+    <tr><td><strong>Long-term (archive)</strong></td><td>Not interactive — Search Jobs / Restore</td><td>—</td><td>Cheap storage; pay to restore or search</td><td>Same table, kept past the hot window</td></tr>
+    <tr><td><strong>Data lake tier</strong></td><td>KQL jobs + notebooks; per-GB scan; not real-time</td><td>—</td><td>Cheapest ingest &amp; storage; 6:1 compression; to 12 yrs</td><td>High-volume forensic / compliance data; long lookbacks</td></tr>
+  </table>
+  <p style="font-size:13px; color:var(--ink-3); font-family:var(--mono); margin-top:-14px">Cost bands are ratios, not quotes — per-GB rates vary by region, commitment tier, and date. Check the current Microsoft Sentinel pricing page before you budget.</p>
+
+  <h2 class="head"><span class="num">04</span>The lake, and the one place it actually saves money</h2>
+  <p class="sub">The data lake is real architecture, not just a cheaper shelf — but the "save bucks" pitch hides a sleight of hand worth calling out.</p>
+
+  <p>When data lands in the Analytics tier it is <strong>mirrored to the lake automatically and simultaneously</strong> — one write, appears in both, same table name, and the mirror is <strong>free</strong>: no second ingestion charge, and the lake copy costs nothing to store while it's inside the analytics retention window. That reads like a free lunch, so here's the correction that makes the whole model click: <strong>the mirror is not net-new spend, so it is not where savings come from.</strong> If everything flows Analytics-first and mirrors down, your bill is just the Analytics bill — the lake changed nothing.</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two paths: Analytics-first pays the analytics ingestion once then mirrors to the lake for free, a retention play; lake-direct pays cheap lake ingestion and storage but keeps data cold. Only lake-direct is a true ingestion saving.">
+      <defs>
+        <marker id="m1" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#f2d45c"/></marker>
+        <marker id="m2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#6fd08c"/></marker>
+        <marker id="m3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#5ea1ff"/></marker>
+      </defs>
+      <!-- Path A -->
+      <text x="24" y="34" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#f2d45c">PATH A · Analytics-first</text>
+      <rect x="24" y="46" width="92" height="46" rx="7" fill="#1c222b" stroke="#2f3742"/><text x="70" y="74" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" fill="#e8ebf0">data</text>
+      <line x1="116" y1="69" x2="150" y2="69" stroke="#f2d45c" stroke-width="2" marker-end="url(#m1)"/>
+      <rect x="154" y="46" width="150" height="46" rx="7" fill="#241f0c" stroke="#f2d45c"/><text x="229" y="66" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#f2d45c">ANALYTICS</text><text x="229" y="82" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" fill="#aab3c0">pay ingest once · $$$</text>
+      <path d="M304 69 C360 69 360 69 400 69" fill="none" stroke="#6fd08c" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#m2)"/>
+      <rect x="404" y="46" width="180" height="46" rx="7" fill="#0d1a26" stroke="#4a7fd0"/><text x="494" y="66" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#8fc0ff">LAKE (mirror)</text><text x="494" y="82" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" fill="#8fdca4">FREE within retention</text>
+      <text x="600" y="66" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">→ then cheap cold</text>
+      <text x="600" y="82" font-family="Inter, sans-serif" font-size="11" fill="#aab3c0">storage after the window</text>
+      <text x="24" y="116" font-family="JetBrains Mono, monospace" font-size="11" fill="#8fdca4">verdict: this is RETENTION, not a discount — you already paid upstream</text>
+
+      <line x1="24" y1="140" x2="876" y2="140" stroke="#232a33" stroke-width="1"/>
+
+      <!-- Path B -->
+      <text x="24" y="174" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#8fc0ff">PATH B · Lake-direct</text>
+      <rect x="24" y="186" width="92" height="46" rx="7" fill="#1c222b" stroke="#2f3742"/><text x="70" y="214" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" fill="#e8ebf0">data</text>
+      <line x1="116" y1="209" x2="150" y2="209" stroke="#5ea1ff" stroke-width="2" marker-end="url(#m3)"/>
+      <rect x="154" y="186" width="200" height="46" rx="7" fill="#0d1a26" stroke="#4a7fd0"/><text x="254" y="206" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#8fc0ff">LAKE (direct)</text><text x="254" y="222" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" fill="#8fdca4">cheap ingest + storage · day 1</text>
+      <rect x="380" y="186" width="300" height="46" rx="7" fill="#26131A" stroke="#f0868a"/><text x="530" y="206" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#f7999b">COLD — no real-time rules against it</text><text x="530" y="222" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" fill="#f0868a">per-GB scan every time you query</text>
+      <text x="24" y="258" font-family="JetBrains Mono, monospace" font-size="11" fill="#8fc0ff">verdict: the ONLY true ingestion saving — bought by going cold on that source</text>
+      <text x="24" y="286" font-family="Inter, sans-serif" font-size="12" fill="#6d7787">Same write can appear in both tiers — but you pay Analytics once; the mirror rides along free.</text>
+    </svg>
+    <figcaption><b>The money diagram.</b> Free mirroring is a retention benefit, not a discount. The lake lowers your bill in exactly one way: data you send <b>straight to it</b> and agree to keep cold — no real-time detection, and a per-GB scan charge whenever you do reach back for it.</figcaption>
+  </figure>
+
+  <p>So the lake doesn't make your data cheaper — it makes <em>cold</em> data cheaper. You save in exact proportion to how much you're willing to make invisible to live rules. And the trade is real: lake data supports full KQL through query jobs and Python through notebooks, but it can't back a real-time analytics rule, and every query meters by the gigabyte scanned. The uniform 6:1 compression is a big part of why "cheap cold storage for up to 12 years" is affordable rather than marketing — 600&nbsp;GB of raw logs bills as roughly 100&nbsp;GB stored.</p>
+
+  <div class="takeaway">
+    <p class="tag">The one-line model</p>
+    <p>You ingest once and pay once. Analytics mirrors to the lake for free, so mirroring is retention, not savings. The only true ingestion saving is data you send straight to the lake and agree to keep cold.</p>
+  </div>
+
+  <h2 class="head"><span class="num">05</span>So where should your logs go?</h2>
+  <p class="sub">Everything above collapses into one routing decision you make per source. Here's the heuristic I actually use.</p>
+
+  <ul class="routebox">
+    <li><b>Drives a detection every few minutes?</b> → <b>Analytics.</b> Authentication, EDR/XDR alerts, cloud audit, threat intel. You can't cool these — a rule can't read what isn't hot. Don't try to save here.</li>
+    <li><b>High-volume, mostly forensic, occasionally needed?</b> → <b>lake-direct</b> (or Basic/Auxiliary if you still want short interactive access). Firewall, proxy, DNS, NetFlow. This is where the bill actually drops.</li>
+    <li><b>Kept only to satisfy an auditor?</b> → <b>lake / long-term.</b> Cheap, compressed, 12-year ceiling — retention as an insurance policy, priced like one.</li>
+    <li><b>Pure noise with no forensic value?</b> → <b>drop it at the DCR.</b> The cheapest gigabyte is the one you never ingest — just remember that call is irreversible.</li>
+  </ul>
+
+  <p>Notice the shape of it: your bill goes down in direct proportion to how much telemetry you're willing to make invisible to real-time detection. That's not a Sentinel quirk — it's the central tension of the whole platform, and it's why "just log everything to Analytics" and "put everything in the lake to save money" are both wrong. The skill is knowing, per source, which of coverage, speed, and cost you're spending and which one you're protecting.</p>
+
+  <div class="takeaway">
+    <p class="tag">The one-line model</p>
+    <p>Route by use, not by habit: hot data that fires rules goes to Analytics; high-volume data you keep for forensics and compliance goes to the lake; genuine noise dies at the DCR. Every table on the lowest rung that still does its job.</p>
+  </div>
+
+  <h2 class="head"><span class="num">06</span>Where this series goes next</h2>
+  <p>That's the foundation: the data is in, shaped, stored on the right rung, and priced deliberately. But a warehouse full of well-sorted data still doesn't catch anyone — nothing here has fired a single alert yet. That's the next post. The arc:</p>
+  <ul>
+    <li><strong>Part 2 — How Sentinel detects.</strong> Analytics rules (templates vs. custom, and why a rule is its query <em>plus</em> its schedule, entities, and grouping), alerts, incidents, proactive hunting, and entity behaviour.</li>
+    <li><strong>Part 3 — How Sentinel responds.</strong> Automation rules vs. playbooks (Logic Apps), auto-enrichment, and the line between remediation you trust to run alone and remediation that needs a human on the trigger.</li>
+    <li><strong>Then the sources themselves</strong> — Defender XDR, Defender for Cloud Apps, and Email &amp; Collaboration — each of which plugs into exactly the pipeline we just drew.</li>
+  </ul>
+
+  <div class="sources"><h2>Sources &amp; further reading</h2><ul>
+    <li><a href="https://learn.microsoft.com/en-us/azure/sentinel/datalake/sentinel-lake-overview">Microsoft Sentinel data lake overview</a><span>architecture, format, and what the lake is for</span></li>
+    <li><a href="https://learn.microsoft.com/en-us/azure/sentinel/manage-data-overview">Manage data tiers and retention</a><span>Analytics vs. Data Lake tier, mirroring, and total retention</span></li>
+    <li><a href="https://learn.microsoft.com/en-us/azure/sentinel/configure-data-retention-archive">Configure interactive and long-term retention</a><span>per-table and workspace retention settings</span></li>
+    <li><a href="https://learn.microsoft.com/en-us/azure/sentinel/geographical-availability-data-residency">Geographical availability &amp; data residency</a><span>why region is near-permanent and lake co-location</span></li>
+    <li><a href="https://www.microsoft.com/en-us/security/pricing/microsoft-sentinel/">Microsoft Sentinel pricing</a><span>current per-GB rates and commitment tiers — always check live</span></li>
+  </ul></div>
+
+</div>
+</article>
+
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Ram Mudigina · Blue Team of One</span>
+    <span><a href="/index.html">Home</a> · <a href="/about.html">About</a></span>
+  </div>
+</footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>
