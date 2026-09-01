@@ -412,3 +412,103 @@ body.zone-console{
 body.zone-console .masthead,body.zone-console .masthead .mark{font-family:var(--mono);font-weight:700}
 body.zone-console .masthead .mark:before{content:"PS BlueTeam:\\> "!important;color:var(--verified);font-weight:400}
 body.zone-console .hero h1,body.zone-console .phead h1,body.zone-console .prow h3,body.zone-console .scard h3,body.zone-console .tile h2,body.zone-console .head{font-family:var(--mono)}
+
+/* ============================================================
+   COMMAND THEME  —  dark bento / SF-first / cyan signal
+   Appended last so it wins on source order. Palette is remapped
+   via variables; structure refined for Apple-grade polish.
+   ============================================================ */
+:root{
+  --bg:#07090c; --bg-2:#0b0e13; --card:#0e1218; --card-2:#11161d;
+  --line:#1b222b; --line-2:#2c3f52; --line-soft:#141a22;
+  --ink:#eaf0f7; --ink-2:#aeb9c7; --ink-3:#7d8a9b; --ink-4:#56606f;
+  --accent:#5ac8fa; --accent-dim:#2b6f93; --accent-ink:#06121c;
+  --string:#7fd0c2; --verified:#45d67a; --severity:#f0868a;
+  --signal-bg:#0b1a25; --verified-bg:#0b1f15; --severity-bg:#25141a; --string-bg:#0c1a20;
+  --warn:#e0b13c; --warn-bg:#211b0b;
+  --measure:72ch;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",Inter,system-ui,sans-serif;
+  --mono:"SF Mono","JetBrains Mono",ui-monospace,Menlo,monospace;
+  --serif:var(--sans); --head:var(--sans);
+}
+html{scroll-behavior:smooth}
+body{-webkit-font-smoothing:antialiased}
+
+/* subtle ambient glow at the very top of every page */
+body::after{content:""; position:fixed; top:0; left:0; right:0; height:360px; z-index:0; pointer-events:none;
+  background:radial-gradient(900px 340px at 50% -12%, rgba(41,151,255,.10), transparent 62%)}
+body>*{position:relative; z-index:1}
+
+/* translucent blur nav */
+.site-head{position:sticky; top:0; z-index:50; background:rgba(7,9,12,.66);
+  backdrop-filter:saturate(180%) blur(20px); -webkit-backdrop-filter:saturate(180%) blur(20px);
+  border-bottom:1px solid var(--line)}
+.site-head-inner{height:52px}
+.mark b{color:var(--accent)}
+.site-nav a{border-radius:7px}
+.site-nav a:hover{color:var(--ink); background:var(--card-2)}
+.kbtn{border-radius:8px}
+.kbtn kbd{background:var(--card-2); border:1px solid var(--line); border-radius:4px; padding:1px 5px}
+
+/* hero — big, tight, SF */
+.hero{padding:46px 0 8px}
+.hero h1,.hero-inner h1{font-family:var(--sans); font-weight:700; letter-spacing:-.03em;
+  line-height:1.08; font-size:clamp(34px,5.2vw,56px); color:#f4f7fb; max-width:19ch}
+.hero h1 em,.hero-inner h1 em{font-style:normal; color:var(--accent)}
+.eyebrow{color:var(--accent)}
+.lede{color:var(--ink-2); font-weight:500}
+.byline{color:var(--ink-3)}
+
+/* section headings keep their mono index, cyan number */
+.head .num{color:var(--accent)}
+.wrap a,.lede a,.sources a,.prose a{color:var(--accent)}
+
+/* code — deeper panel, softer radius */
+.code,pre{background:#0a0d12; border-radius:12px; border-color:var(--line)}
+.copybtn{color:var(--ink-2); background:var(--card-2); border:1px solid var(--line); border-radius:7px}
+.copybtn:hover{color:var(--ink); border-color:var(--accent-dim)}
+.k{background:var(--card-2); color:#9fdcff; border-radius:5px; border-color:var(--line)}
+
+/* tables */
+.cmp th{color:var(--accent)}
+
+/* callouts — cyan / amber / green */
+.analogy{background:var(--signal-bg); border-color:color-mix(in srgb,var(--accent) 42%,transparent)}
+.analogy .tag{color:var(--accent)}
+.caveat{background:var(--warn-bg); border-color:color-mix(in srgb,var(--warn) 46%,transparent)}
+.caveat h3{color:var(--warn)}
+.takeaway{background:var(--verified-bg); border-color:color-mix(in srgb,var(--verified) 40%,transparent)}
+.takeaway .tag{color:var(--verified)}
+
+/* bare figures / diagrams */
+figure{margin:28px 0}
+figure svg{display:block; width:100%; height:auto}
+figcaption{font-family:var(--mono); font-size:12.5px; color:var(--ink-3); margin-top:10px; line-height:1.55}
+
+/* cards — Apple radius + lift */
+.scard{border-radius:18px; background:linear-gradient(180deg,var(--card),var(--bg-2))}
+.scard:hover{border-color:var(--line-2); transform:translateY(-3px);
+  box-shadow:0 18px 44px rgba(0,0,0,.5), 0 0 0 1px rgba(90,200,250,.10)}
+.count-badge{border-radius:6px}
+.count-badge.live{color:var(--verified); border-color:color-mix(in srgb,var(--verified) 40%,transparent); background:var(--verified-bg)}
+.enter,.more,.prow .more{color:var(--accent)}
+.prow{border-radius:10px}
+.prow:hover{background:var(--card); padding-left:14px}
+.prow h3{font-family:var(--sans)}
+
+/* topic chips */
+.chip{border-radius:980px; transition:border-color .2s, color .2s, transform .2s}
+.chip:hover{border-color:var(--accent); color:var(--accent); transform:translateY(-2px)}
+
+/* progress + palette */
+.progress{background:linear-gradient(90deg,var(--accent),var(--verified)); box-shadow:0 0 10px var(--accent)}
+.pal-dialog{border-radius:16px}
+.opt .code{color:var(--accent)}
+
+/* comments — dark, in-theme */
+.comments{border-top:1px solid var(--line); margin-top:24px}
+.comments-head h2{font-family:var(--sans); color:#f4f7fb; letter-spacing:-.02em; font-weight:650}
+.comments-head p{color:var(--ink-3)}
+
+footer{background:var(--bg-2)}
+footer,footer .wrap{color:var(--ink-3)}
