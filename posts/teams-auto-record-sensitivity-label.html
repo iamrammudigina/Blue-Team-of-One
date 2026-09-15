@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Auto-recording Teams meetings, hands-off — Blue Team of One</title>
+<meta name="description" content="Making Teams meetings record automatically with zero organiser action — using a Microsoft Purview sensitivity label published as the default meeting label. Why the label beats a policy or template, the Teams Premium make-or-break, the scope gotchas, and the governance gate.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680;700&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=30">
+<style>
+  figure.diagram{margin:30px 0; padding:0}
+  figure.diagram svg{display:block; width:100%; height:auto; background:#0c1016; border:1px solid var(--line); border-radius:12px}
+  figure.diagram figcaption{margin-top:10px; font-family:var(--mono); font-size:12.5px; color:var(--ink-3); line-height:1.5}
+  figure.diagram figcaption b{color:var(--ink-2)}
+  ul.scopebox{list-style:none; border:1px solid var(--line); border-radius:10px; background:var(--bg-2); padding:6px 20px; margin:26px 0}
+  ul.scopebox li{margin:13px 0; color:var(--ink-2); font-size:15.5px; line-height:1.55; padding-left:26px; position:relative}
+  ul.scopebox li b{color:var(--ink)}
+  ul.scopebox li .mk{position:absolute; left:0; top:0; font-weight:700}
+  ul.scopebox li .yes{color:var(--verified)} ul.scopebox li .no{color:var(--severity)} ul.scopebox li .arw{color:var(--accent)}
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/"><span class="mark">Blue Team <b>of One</b></span><span class="tag">field notes · security</span></a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a><a href="/ir/">IR</a><a href="/identity/">Identity</a><a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a><a href="/detection/">Detection</a><a href="/cloud/" aria-current="page">Cloud</a><a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a><a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/cloud/">Cloud Security</a><span class="sep">›</span><a href="/cloud/purview-governance.html">Purview &amp; governance</a></p>
+    <p class="eyebrow"><span class="dot"></span>Microsoft Purview · Teams governance</p>
+    <h1>Auto-recording Teams meetings, <em>hands-off</em></h1>
+    <p class="lede">A client wanted every scheduled meeting for a set of users recorded — governance-grade, no exceptions, and crucially with <em>nothing</em> for the organiser to remember. The obvious paths all leave a human in the loop. Exactly one mechanism removes it entirely, and it isn't the one you'd reach for first.</p>
+    <div class="byline"><span><b>Ram Mudigina</b></span><span>September 14, 2026</span><span>~11 min read</span></div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+  <p>The request sounds trivial: "make these people's Teams meetings record automatically." It isn't, because the two mechanisms everyone reaches for first — a Teams meeting policy, or a Teams Premium meeting template — both leave the organiser having to <em>do something</em> every single meeting. Flip a toggle. Pick a template. The moment a busy person forgets once, the recording that legal or the client actually needed doesn't exist. Governance-grade means the human can't be the point of failure.</p>
+
+  <div class="analogy">
+    <p class="tag">The key insight</p>
+    <p>Only a Microsoft Purview <strong>sensitivity label</strong>, published as the <em>default label for meetings</em>, applies itself to every new meeting and enforces recording with zero user action. A policy unlocks the option; a template offers the option; a label <em>is</em> the decision, made before the organiser touches anything.</p>
+  </div>
+
+  <h2 class="head"><span class="num">01</span>Three mechanisms, one that's actually hands-off</h2>
+  <p class="sub">This is the decision that saves the next engineer the most time — the other two look right and quietly aren't.</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three ways to auto-record: a meeting policy and a Premium template both require the organiser to act each meeting; only a sensitivity label set as the default meeting label is hands-off.">
+      <text x="24" y="30" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#7d8a9b" letter-spacing=".05em">WHO PRESSES THE BUTTON?</text>
+      <!-- policy -->
+      <rect x="24" y="46" width="852" height="56" rx="9" fill="#211b0b" stroke="#e0b13c"/>
+      <text x="40" y="70" font-family="JetBrains Mono, monospace" font-size="12.5" font-weight="700" fill="#e0b13c">MEETING POLICY · AutoRecording</text>
+      <text x="40" y="90" font-family="Inter, sans-serif" font-size="12" fill="#aab3c0">unlocks an auto-record option — but it's off by default</text>
+      <text x="860" y="70" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="#f0868a">✘ organiser ticks it</text>
+      <text x="860" y="88" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="#f0868a">every meeting</text>
+      <!-- template -->
+      <rect x="24" y="110" width="852" height="56" rx="9" fill="#211b0b" stroke="#e0b13c"/>
+      <text x="40" y="134" font-family="JetBrains Mono, monospace" font-size="12.5" font-weight="700" fill="#e0b13c">PREMIUM TEMPLATE · locked</text>
+      <text x="40" y="154" font-family="Inter, sans-serif" font-size="12" fill="#aab3c0">auto-records and can't be turned off — once it's chosen</text>
+      <text x="860" y="134" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="#f0868a">✘ organiser picks the</text>
+      <text x="860" y="152" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" fill="#f0868a">template each time</text>
+      <!-- label -->
+      <rect x="24" y="174" width="852" height="60" rx="9" fill="#0b1f15" stroke="#30d158"/>
+      <text x="40" y="199" font-family="JetBrains Mono, monospace" font-size="12.5" font-weight="700" fill="#45d67a">SENSITIVITY LABEL · default for meetings</text>
+      <text x="40" y="220" font-family="Inter, sans-serif" font-size="12" fill="#aab3c0">auto-applies to every new meeting and enforces recording</text>
+      <text x="860" y="208" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="#45d67a">✔ nobody — hands-off</text>
+    </svg>
+    <figcaption><b>Only the label removes the human.</b> Microsoft confirms a sensitivity label can enforce automatic recording even when the admin policy is off for that organiser — and a label policy can set a default label for meetings so it applies without the organiser choosing anything.</figcaption>
+  </figure>
+
+  <div class="caveat">
+    <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+    <div><h3>Pick one mechanism — the label outranks the others</h3><p>Sensitivity labels take precedence over meeting templates and policies. Don't run a label <em>and</em> a template both trying to control recording — the label wins and the template just adds confusion. Keep any pilot policy or template only as a fallback during build, then retire it once the label is proven.</p></div>
+  </div>
+
+  <h2 class="head"><span class="num">02</span>Prerequisites, and the one check that decides everything</h2>
+  <p class="sub">The label enforces recording <em>only</em> when Teams Premium is present on the organiser. Get this wrong and the label applies silently and records nothing.</p>
+
+  <p>Four things have to be true before you configure anything: <strong>Teams Premium</strong> on every in-scope organiser (the auto-record option in the label only enforces with Premium), <strong>cloud recording allowed</strong> in the organiser's meeting policy (the master switch — if recording is disallowed, the label can't force it), <strong>Purview roles</strong> to create and publish labels (Information Protection Admin / Compliance Admin), and testing from the <strong>Teams desktop app</strong>, where behaviour is most reliable. Recordings land in the organiser's OneDrive under Recordings.</p>
+
+  <p>Run these read-only checks first. The first confirms the master switch; the second is the make-or-break.</p>
+<pre class="code">Connect-MicrosoftTeams
+
+<span class="muted"># 1 — cloud recording must be allowed (the master switch)</span>
+Get-CsTeamsMeetingPolicy |
+  Select-Object Identity, AllowCloudRecording, AutoRecording |
+  Format-Table -Auto</pre>
+
+<pre class="code"><span class="muted"># 2 — Teams Premium must be present on the target organiser</span>
+Get-CsOnlineUser -Identity &lt;organiser-upn&gt; |
+  Select-Object -ExpandProperty AssignedPlan |
+  Where-Object { $_.Capability -like "TEAMSPRO_*" } |
+  Select-Object -ExpandProperty Capability |
+  Sort-Object</pre>
+
+  <div class="caveat">
+    <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+    <div><h3>No <span class="k">TEAMSPRO_*</span> plans, no recording</h3><p>You must see the <strong>TEAMSPRO_*</strong> family come back (e.g. <span class="k">TEAMSPRO_MGMT</span>, <span class="k">TEAMSPRO_CUST</span>, <span class="k">TEAMSPRO_PROTECTION</span>). If they're absent, stop — the label will apply but auto-record will never fire, and you'll waste an afternoon wondering why. Assign Premium first, then continue.</p></div>
+  </div>
+
+  <h2 class="head"><span class="num">03</span>Build the label — and the scope trap</h2>
+  <p class="sub">Purview → Information protection → Labels → Create a label. The scope screen has a dependency that catches everyone once.</p>
+
+  <p>Give it a clear display name (users see it), then set the <strong>scope</strong> to <strong>Files &amp; other data assets, Emails, and Meetings</strong>. In <strong>Meeting settings</strong>, set <strong>Record and transcribe automatically = On</strong>, then select and <strong>Lock</strong> it so organisers can't turn it off. Leave <strong>Access control</strong> and <strong>Content marking</strong> as <strong>None</strong> — label encryption will block download of the recordings, which is the opposite of what you want.</p>
+
+  <div class="caveat">
+    <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+    <div><h3>You can't scope it to Meetings only</h3><p>The <strong>Meetings</strong> scope depends on <strong>Files &amp; other data assets</strong> and <strong>Email</strong> both being selected — try to narrow it to Meetings-only and Purview removes the Meetings option. Accept all three; the side effect is the label also shows up as a file/email classification. Keep Access control and Content marking = None so it never encrypts or watermarks documents, and leave it <em>off</em> as the file/email default (next section) so it isn't stamped on everything.</p></div>
+  </div>
+
+  <h2 class="head"><span class="num">04</span>Publish it as the default meeting label</h2>
+  <p class="sub">The label does nothing until it's published <em>and</em> set as the meeting default. That one setting is the entire trick.</p>
+
+  <p>Purview → Information protection → Label policies → Publish label. Add the label, target the organiser(s) — start with one pilot account — then in <strong>Policy settings</strong> set <strong>Default label for meetings</strong> to your label. That is the step that removes the manual pick: every new meeting the targeted user schedules is labelled automatically. Leave the file/email default unset (or a different label) so the auto-record label isn't stamped on every document and email.</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 940 168" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The flow: create the label with all three scopes and record-automatically locked, publish it to the organisers, set it as the default meeting label, then every new meeting is auto-labelled and records automatically because Premium enforces it.">
+      <defs><marker id="f1" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#5ac8fa"/></marker></defs>
+      <g font-family="Inter, sans-serif">
+        <rect x="16" y="52" width="150" height="64" rx="9" fill="#12161c" stroke="#2f3742"/>
+        <text x="91" y="76" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="#aab3c0">CREATE LABEL</text>
+        <text x="91" y="93" text-anchor="middle" font-size="10" fill="#8592a3">3 scopes · record</text>
+        <text x="91" y="106" text-anchor="middle" font-size="10" fill="#8592a3">auto + locked</text>
+        <line x1="166" y1="84" x2="196" y2="84" stroke="#5ac8fa" stroke-width="2" marker-end="url(#f1)"/>
+        <rect x="200" y="52" width="150" height="64" rx="9" fill="#12161c" stroke="#2f3742"/>
+        <text x="275" y="76" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="#aab3c0">PUBLISH POLICY</text>
+        <text x="275" y="93" text-anchor="middle" font-size="10" fill="#8592a3">target the pilot</text>
+        <text x="275" y="106" text-anchor="middle" font-size="10" fill="#8592a3">organiser</text>
+        <line x1="350" y1="84" x2="380" y2="84" stroke="#5ac8fa" stroke-width="2" marker-end="url(#f1)"/>
+        <rect x="384" y="46" width="176" height="76" rx="9" fill="#0b1a25" stroke="#5ac8fa"/>
+        <text x="472" y="72" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="#5ac8fa">DEFAULT MEETING LABEL</text>
+        <text x="472" y="90" text-anchor="middle" font-size="10.5" fill="#cfe6f7">the step that removes</text>
+        <text x="472" y="104" text-anchor="middle" font-size="10.5" fill="#cfe6f7">the manual pick</text>
+        <line x1="560" y1="84" x2="590" y2="84" stroke="#5ac8fa" stroke-width="2" marker-end="url(#f1)"/>
+        <rect x="594" y="52" width="150" height="64" rx="9" fill="#12161c" stroke="#2f3742"/>
+        <text x="669" y="76" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="#aab3c0">NEW MEETING</text>
+        <text x="669" y="93" text-anchor="middle" font-size="10" fill="#8592a3">auto-labelled,</text>
+        <text x="669" y="106" text-anchor="middle" font-size="10" fill="#8592a3">no user action</text>
+        <line x1="744" y1="84" x2="774" y2="84" stroke="#5ac8fa" stroke-width="2" marker-end="url(#f1)"/>
+        <rect x="778" y="52" width="150" height="64" rx="9" fill="#0b1f15" stroke="#30d158"/>
+        <text x="853" y="76" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="#45d67a">RECORDS</text>
+        <text x="853" y="93" text-anchor="middle" font-size="10" fill="#8592a3">Premium enforces;</text>
+        <text x="853" y="106" text-anchor="middle" font-size="10" fill="#8592a3">banner shown</text>
+      </g>
+      <text x="16" y="30" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#7d8a9b" letter-spacing=".05em">LABEL → DEFAULT → EVERY MEETING</text>
+    </svg>
+    <figcaption><b>Build once, then it's automatic forever.</b> The recording banner reads "Started automatically per the meeting organizer's settings" — nobody pressed record, internal <em>and</em> with external attendees present, which don't block it.</figcaption>
+  </figure>
+
+  <div class="caveat">
+    <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+    <div><h3>Give it up to 24 hours before you call it broken</h3><p>Purview label-policy changes take up to a day to propagate to the Teams and Outlook clients. Configure it, then walk away — do not test, and definitely do not conclude it failed, before then. This single fact accounts for most "it didn't work" reports.</p></div>
+  </div>
+
+  <h2 class="head"><span class="num">05</span>What it covers — and what it quietly doesn't</h2>
+  <p class="sub">The method is narrower than "record everything." Be explicit with the client about the edges, because the gaps look like bugs otherwise.</p>
+
+  <ul class="scopebox">
+    <li><span class="mk yes">✔</span><b>Scheduled Teams meetings</b> organised by a labelled user — records automatically, internal <em>and</em> external attendees.</li>
+    <li><span class="mk no">✘</span><b>Calls</b> (the call button) — there is no native auto-record for calls at all, by any mechanism.</li>
+    <li><span class="mk no">✘</span><b>Meetings organised by an external / other-tenant account</b> — outside your tenant's control, so the label never applies.</li>
+    <li><span class="mk arw">→</span><b>Always-on capture of every call and meeting for a named user</b> (e.g. for an investigation) is <b>compliance recording</b> — a third-party bot. Separate, licensed, procurement-led; not this method.</li>
+  </ul>
+
+  <h2 class="head"><span class="num">06</span>The part that isn't technical</h2>
+  <p class="sub">This capability records people automatically. The engineering is the easy half; the half that gets you in trouble is consent, retention, and access.</p>
+
+  <p>Before enabling on real users — as opposed to dummy test meetings — get the following confirmed in writing by the client's HR/Legal and recorded on the change ticket. None of this is optional, and none of it is the engineer's call to make alone:</p>
+  <ul>
+    <li><strong>Consent &amp; notice.</strong> Recording-consent law varies by jurisdiction — some are all-party-consent (Illinois, for example). The Teams banner notifies <em>participants</em>; separate <em>employee-monitoring</em> notice is the client's responsibility, not something the banner covers.</li>
+    <li><strong>Retention &amp; storage.</strong> Where recordings live and for how long, with a retention policy applied where required. In healthcare tenants, assess PHI exposure explicitly — an auto-recorded clinical conversation is regulated data the moment it's saved.</li>
+    <li><strong>Access.</strong> Who may retrieve recordings — especially the case where the organiser is themselves the subject of an investigation and shouldn't hold the only key.</li>
+    <li><strong>Licensing cost.</strong> Every in-scope organiser needs Teams Premium. Surface that as a cost line early, not as a surprise after the pilot works.</li>
+  </ul>
+
+  <div class="takeaway">
+    <p class="tag">The one-line model</p>
+    <p>A meeting policy unlocks recording, a template offers it, but only a sensitivity label set as the default for meetings <em>enforces</em> it with no human in the loop — provided Teams Premium is present. The technical build takes an afternoon; the consent-and-retention conversation is the part that actually protects everyone.</p>
+  </div>
+
+  <h2 class="head"><span class="num">07</span>Rollback, and a quick decision guide</h2>
+  <p class="sub">To pull it from a user, unpublish or retarget the label policy. Retire any pilot fallback only after the label is confirmed recording.</p>
+
+<pre class="code"><span class="muted"># unassign a pilot meeting policy (back to Global)</span>
+Grant-CsTeamsMeetingPolicy -Identity &lt;upn&gt; -PolicyName $null
+Remove-CsTeamsMeetingPolicy -Identity "&lt;pilot-policy&gt;"
+
+<span class="muted"># meeting-template removal is portal-only:</span>
+<span class="muted"># Teams admin center &gt; Meetings &gt; Meeting templates &gt; &lt;template&gt; &gt; Remove</span></pre>
+
+  <table class="cmp">
+    <tr><th>Client wants…</th><th>Use</th><th>Notes</th></tr>
+    <tr><td>Meetings auto-record, fully hands-off</td><td><strong>Sensitivity label</strong> (this method)</td><td>Teams Premium required; scoped per organiser</td></tr>
+    <tr><td>Meetings auto-record, organiser opts in</td><td>Premium locked <strong>template</strong></td><td>Cheaper on mindshare; needs a selection each time</td></tr>
+    <tr><td>Every call + meeting, for investigations</td><td><strong>Compliance recording</strong> (bot)</td><td>Third-party, procurement, HR/Legal-led</td></tr>
+  </table>
+
+  <div class="sources"><h2>Sources &amp; further reading</h2><ul>
+    <li><a href="https://learn.microsoft.com/purview/sensitivity-labels-meetings">Sensitivity labels for meetings</a><span>the label settings that enforce recording</span></li>
+    <li><a href="https://learn.microsoft.com/microsoftteams/meeting-templates-sensitivity-labels-policies">Templates, labels &amp; policies together</a><span>which mechanism wins when they overlap</span></li>
+    <li><a href="https://learn.microsoft.com/microsoftteams/configure-meetings-sensitive-protection">Configure meetings for sensitive data</a><span>scoping and protection options</span></li>
+  </ul></div>
+
+</div>
+</article>
+
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="dark_dimmed"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Ram Mudigina · Blue Team of One</span>
+    <span><a href="/index.html">Home</a> · <a href="/about.html">About</a></span>
+  </div>
+</footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>
