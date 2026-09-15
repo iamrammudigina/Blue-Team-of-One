@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KQL Library — Blue Team of One</title>
+<meta name="description" content="A living library of investigation KQL for Microsoft Sentinel and Defender — copy, run, tune to your tenant. Grouped by hunt category and searchable.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680;700&family=Newsreader:ital,opsz,wght@0,6..72,500&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=30">
+<style>
+  .lib-intro{max-width:70ch; color:var(--ink-2); font-size:16px; margin:6px 0 26px}
+  .lib-note{font-family:var(--mono); font-size:12.5px; color:var(--ink-3); border-left:2px solid var(--accent-dim); padding:4px 0 4px 14px; margin:0 0 26px}
+  .qbar{position:sticky; top:52px; z-index:20; background:rgba(7,9,12,.82); backdrop-filter:saturate(180%) blur(16px);
+    border-bottom:1px solid var(--line); padding:14px 0; margin-bottom:26px}
+  .qbar .in{display:flex; gap:12px; align-items:center; flex-wrap:wrap}
+  .qchips{display:flex; gap:8px; flex-wrap:wrap}
+  .qchip{font-family:var(--mono); font-size:12px; color:var(--ink-2); background:var(--card); border:1px solid var(--line);
+    border-radius:980px; padding:6px 13px; cursor:pointer; transition:all .18s}
+  .qchip:hover{border-color:var(--accent-dim); color:var(--ink)}
+  .qchip.on{background:var(--signal-bg); border-color:var(--accent); color:var(--accent)}
+  .qsearch{margin-left:auto; font-family:var(--mono); font-size:13px; color:var(--ink); background:var(--code);
+    border:1px solid var(--line); border-radius:9px; padding:9px 14px; min-width:220px; outline:none}
+  .qsearch:focus{border-color:var(--accent-dim)}
+  .qsearch::placeholder{color:var(--ink-4)}
+  .qcount{font-family:var(--mono); font-size:12px; color:var(--ink-3); margin:0 0 18px}
+  .qcard{border:1px solid var(--line); border-radius:14px; background:var(--card); padding:20px 20px 6px; margin:0 0 18px}
+  .qcard.hide{display:none}
+  .qhead{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:4px}
+  .qhead h3{font-family:var(--sans); font-size:18px; font-weight:600; letter-spacing:-.01em; color:var(--ink); margin:0; flex:1}
+  .qtag{font-family:var(--mono); font-size:10.5px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
+    color:var(--accent); background:var(--signal-bg); border:1px solid var(--accent-dim); border-radius:5px; padding:2px 8px; white-space:nowrap}
+  .qmeta{display:grid; grid-template-columns:auto 1fr; gap:2px 12px; font-size:13.5px; margin:8px 0 12px}
+  .qmeta dt{font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-4); padding-top:2px}
+  .qmeta dd{margin:0; color:var(--ink-2); line-height:1.5}
+  .qmeta dd.gotcha{color:var(--warn)}
+  .qcard pre.code{margin:0 0 16px}
+  .qempty{display:none; text-align:center; color:var(--ink-3); font-family:var(--mono); font-size:14px; padding:40px 0}
+</style>
+</head>
+<body>
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/"><span class="mark">Blue Team <b>of One</b></span><span class="tag">field notes · security</span></a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a><a href="/ir/">IR</a><a href="/identity/">Identity</a><a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a><a href="/detection/" aria-current="page">Detection</a><a href="/cloud/">Cloud</a><a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a><a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="wrap">
+    <div class="phead">
+      <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/detection/">Detection Engineering</a><span class="sep">›</span><span>KQL Library</span></p>
+      <p class="kicker">Library</p>
+      <h1>KQL Library</h1>
+      <p class="tagline">Investigation KQL for Microsoft Sentinel &amp; Defender — copy, run, tune to your tenant.</p>
+    </div>
+
+    <p class="lib-intro">The twin to the PowerShell Library: the queries I actually reach for during an investigation, grouped by what you're hunting. Each one says what it finds, when to run it, and the gotcha that bites. Filter by category or search by keyword.</p>
+    <p class="lib-note"># Seed set — column names and result codes vary by tenant and workspace. Treat these as starting points: verify the schema and tune the thresholds before you trust an alert built on one.</p>
+
+    <div class="qbar"><div class="in">
+      <div class="qchips" id="chips">
+        <span class="qchip on" data-cat="all">All</span>
+        <span class="qchip" data-cat="identity">Identity &amp; sign-ins</span>
+        <span class="qchip" data-cat="email">Email &amp; collab</span>
+        <span class="qchip" data-cat="endpoint">Endpoint</span>
+        <span class="qchip" data-cat="persistence">Persistence</span>
+        <span class="qchip" data-cat="cloud">Cloud &amp; exfil</span>
+        <span class="qchip" data-cat="intune">Intune</span>
+      </div>
+      <input class="qsearch" id="q" placeholder="filter… (e.g. inbox rule, encoded, consent)" autocomplete="off">
+    </div></div>
+
+    <p class="qcount" id="count"></p>
+    <div id="lib">
+
+      <!-- IDENTITY -->
+      <div class="qcard" data-cat="identity" data-text="password spray brute force failed success sign-in signinlogs">
+        <div class="qhead"><h3>Many failures, then a success (spray → hit)</h3><span class="qtag">Identity</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>Accounts hit by a burst of failed sign-ins followed by at least one success — the shape of a successful password spray or brute force.</dd>
+          <dt>When</dt><dd>Daily triage; first move after any spray alert.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">Service accounts spray themselves with stale creds — allowlist them, or you'll chase ghosts.</dd>
+        </dl>
+<pre class="code">SigninLogs
+| where TimeGenerated &gt; ago(24h)
+| summarize Failures = countif(ResultType != 0),
+            Successes = countif(ResultType == 0),
+            IPs = dcount(IPAddress)
+    by UserPrincipalName
+| where Failures &gt;= 10 and Successes &gt;= 1
+| sort by Failures desc</pre>
+      </div>
+
+      <div class="qcard" data-cat="identity" data-text="legacy auth imap pop smtp mapi activesync mfa bypass basic authentication">
+        <div class="qhead"><h3>Successful legacy-auth sign-ins (MFA bypass)</h3><span class="qtag">Identity</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>Logins over legacy protocols that don't support modern auth — the classic way attackers dodge MFA.</dd>
+          <dt>When</dt><dd>After turning on a Conditional Access legacy-auth block, to hunt the stragglers still getting through.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">Exchange ActiveSync can be legitimate on older mobile mail clients — confirm the device before you disable.</dd>
+        </dl>
+<pre class="code">SigninLogs
+| where TimeGenerated &gt; ago(7d)
+| where ResultType == 0
+| where ClientAppUsed in ("Other clients","IMAP4","POP3","SMTP","MAPI","Exchange ActiveSync")
+| summarize count() by UserPrincipalName, ClientAppUsed, AppDisplayName
+| sort by count_ desc</pre>
+      </div>
+
+      <div class="qcard" data-cat="identity" data-text="impossible travel two countries geo sign-in locations">
+        <div class="qhead"><h3>One account, two countries, one hour</h3><span class="qtag">Identity</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>A single user with successful sign-ins from two or more countries inside a short window — a cheap impossible-travel proxy.</dd>
+          <dt>When</dt><dd>Account-compromise triage; pairs well with a token-theft investigation.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">VPNs and cloud egress skew geo-IP. Treat as a lead, never a verdict — corroborate with device and app.</dd>
+        </dl>
+<pre class="code">SigninLogs
+| where TimeGenerated &gt; ago(1d)
+| where ResultType == 0
+| summarize Countries = dcount(Location), List = make_set(Location), IPs = make_set(IPAddress)
+    by UserPrincipalName, bin(TimeGenerated, 1h)
+| where Countries &gt;= 2</pre>
+      </div>
+
+      <!-- EMAIL -->
+      <div class="qcard" data-cat="email" data-text="inbox rule bec business email compromise forward delete hide mailbox">
+        <div class="qhead"><h3>Inbox rule that hides or forwards mail</h3><span class="qtag">Email &amp; collab</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>New or changed inbox rules that delete, move, or forward — the single most reliable fingerprint of a BEC takeover.</dd>
+          <dt>When</dt><dd>The moment a mailbox is suspected compromised; also as a standing scheduled rule.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">Power users build legitimate filing rules constantly — the tell is <em>forward/redirect to an external address</em> or <em>delete</em>, not the rule itself.</dd>
+        </dl>
+<pre class="code">CloudAppEvents
+| where TimeGenerated &gt; ago(7d)
+| where ActionType in ("New-InboxRule","Set-InboxRule")
+| where tostring(RawEventData.Parameters) has_any
+        ("DeleteMessage","ForwardTo","RedirectTo","ForwardAsAttachmentTo","MoveToFolder")
+| project TimeGenerated, AccountDisplayName = tostring(RawEventData.UserId),
+          ActionType, Rule = tostring(RawEventData.Parameters)</pre>
+      </div>
+
+      <div class="qcard" data-cat="email" data-text="mass mail external send blast phishing outbound recipients">
+        <div class="qhead"><h3>Sudden mass external send</h3><span class="qtag">Email &amp; collab</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>A sender fanning out to an unusual number of external recipients in an hour — internal phishing from a taken-over account.</dd>
+          <dt>When</dt><dd>Right after a suspicious sign-in on a mailbox; correlate the two timelines.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">Newsletters and app/service mailboxes trip this constantly — allowlist known senders.</dd>
+        </dl>
+<pre class="code">EmailEvents
+| where TimeGenerated &gt; ago(24h)
+| where EmailDirection == "Outbound"
+| summarize Recipients = dcount(RecipientEmailAddress), Messages = count()
+    by SenderFromAddress, bin(TimeGenerated, 1h)
+| where Recipients &gt;= 50
+| sort by Recipients desc</pre>
+      </div>
+
+      <!-- ENDPOINT -->
+      <div class="qcard" data-cat="endpoint" data-text="encoded powershell base64 -enc obfuscation command line hidden">
+        <div class="qhead"><h3>Encoded / hidden PowerShell</h3><span class="qtag">Endpoint</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>PowerShell launched with an encoded command or hidden window — a staple of loaders and hands-on-keyboard attackers.</dd>
+          <dt>When</dt><dd>Endpoint-alert triage; broad hunt across a suspected host.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">Legit management tooling uses <span class="k">-nop</span> and hidden windows too — weight on <span class="k">-enc</span> and pivot on the <em>initiating</em> process.</dd>
+        </dl>
+<pre class="code">DeviceProcessEvents
+| where TimeGenerated &gt; ago(7d)
+| where FileName in~ ("powershell.exe","pwsh.exe")
+| where ProcessCommandLine has_any ("-enc","-EncodedCommand","FromBase64String","-w hidden","-windowstyle hidden")
+| project TimeGenerated, DeviceName, AccountName, ProcessCommandLine, InitiatingProcessFileName
+| sort by TimeGenerated desc</pre>
+      </div>
+
+      <div class="qcard" data-cat="endpoint" data-text="office spawns shell macro lolbin winword excel outlook child process">
+        <div class="qhead"><h3>Office app spawning a shell</h3><span class="qtag">Endpoint</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>Word, Excel, PowerPoint, or Outlook launching a command interpreter or LOLBin — the signature of a malicious macro or exploit.</dd>
+          <dt>When</dt><dd>Phishing-response and endpoint triage. Very high signal, low volume.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">Some add-ins legitimately shell out — check the command line before you isolate.</dd>
+        </dl>
+<pre class="code">DeviceProcessEvents
+| where TimeGenerated &gt; ago(7d)
+| where InitiatingProcessFileName in~ ("winword.exe","excel.exe","powerpnt.exe","outlook.exe")
+| where FileName in~ ("cmd.exe","powershell.exe","pwsh.exe","wscript.exe","cscript.exe","mshta.exe","rundll32.exe","regsvr32.exe")
+| project TimeGenerated, DeviceName, InitiatingProcessFileName, FileName, ProcessCommandLine</pre>
+      </div>
+
+      <!-- PERSISTENCE -->
+      <div class="qcard" data-cat="persistence" data-text="app credentials service principal secret certificate backdoor oauth entra">
+        <div class="qhead"><h3>New secret added to an app or service principal</h3><span class="qtag">Persistence</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>Credentials (a secret or certificate) added to an application or service principal — a favourite Entra persistence move after a token-theft.</dd>
+          <dt>When</dt><dd>Post-compromise hunting; standing rule for privileged tenants.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">Legit app registrations rotate secrets — baseline who normally does this, and alert on the actor you don't expect.</dd>
+        </dl>
+<pre class="code">AuditLogs
+| where TimeGenerated &gt; ago(30d)
+| where OperationName in~ ("Add service principal credentials",
+        "Update application - Certificates and secrets management",
+        "Add app role assignment to service principal")
+| project TimeGenerated, OperationName,
+          Actor = tostring(InitiatedBy.user.userPrincipalName),
+          Target = tostring(TargetResources[0].displayName)
+| sort by TimeGenerated desc</pre>
+      </div>
+
+      <div class="qcard" data-cat="persistence" data-text="privileged role assignment global admin add member to role pim">
+        <div class="qhead"><h3>Someone added to a privileged role</h3><span class="qtag">Persistence</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>Directory-role membership changes into anything admin-flavoured — privilege escalation, or an attacker granting themselves persistence.</dd>
+          <dt>When</dt><dd>Daily; and immediately during any identity incident.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">PIM activations also log here — filter to permanent assignments, or you'll flag every legitimate JIT elevation.</dd>
+        </dl>
+<pre class="code">AuditLogs
+| where TimeGenerated &gt; ago(7d)
+| where OperationName == "Add member to role"
+| extend Role = tostring(TargetResources[0].displayName)
+| where Role has_any ("Admin","Administrator")
+| project TimeGenerated, Role,
+          Actor = tostring(InitiatedBy.user.userPrincipalName),
+          Added = tostring(TargetResources[0].userPrincipalName)</pre>
+      </div>
+
+      <!-- CLOUD & EXFIL -->
+      <div class="qcard" data-cat="cloud" data-text="oauth consent illicit application grant phishing delegated permission">
+        <div class="qhead"><h3>OAuth app consent (illicit-consent phishing)</h3><span class="qtag">Cloud &amp; exfil</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>Users (or admins) consenting to an application's permissions — the mechanism behind illicit-consent grant attacks that survive a password reset.</dd>
+          <dt>When</dt><dd>After any consent-phishing report; standing rule with an app-allowlist.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">Separate <em>admin</em> consent from <em>user</em> consent, and baseline your known apps — the noise is legitimate SaaS onboarding.</dd>
+        </dl>
+<pre class="code">AuditLogs
+| where TimeGenerated &gt; ago(14d)
+| where OperationName in~ ("Consent to application","Add delegated permission grant","Add OAuth2PermissionGrant")
+| project TimeGenerated, OperationName,
+          Actor = tostring(InitiatedBy.user.userPrincipalName),
+          App = tostring(TargetResources[0].displayName)
+| sort by TimeGenerated desc</pre>
+      </div>
+
+      <div class="qcard" data-cat="cloud" data-text="exfil download mass onedrive sharepoint anonymous link external sharing">
+        <div class="qhead"><h3>Bulk file downloads (staging exfil)</h3><span class="qtag">Cloud &amp; exfil</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>A user pulling an unusual volume of files from SharePoint/OneDrive in a short window — data staging before exfil, or a leaver.</dd>
+          <dt>When</dt><dd>Insider and departing-employee reviews; post-compromise data-access checks.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">The OneDrive sync client inflates download counts massively — exclude sync, or scope to browser downloads.</dd>
+        </dl>
+<pre class="code">CloudAppEvents
+| where TimeGenerated &gt; ago(24h)
+| where ActionType == "FileDownloaded"
+| summarize Downloads = count(), Files = dcount(tostring(RawEventData.ObjectId))
+    by Account = tostring(RawEventData.UserId), bin(TimeGenerated, 1h)
+| where Downloads &gt;= 200
+| sort by Downloads desc</pre>
+      </div>
+
+      <!-- INTUNE -->
+      <div class="qcard" data-cat="intune" data-text="intune configuration change out of hours audit device management endpoint">
+        <div class="qhead"><h3>Intune config change out of hours</h3><span class="qtag">Intune</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>Create / delete / patch operations against Intune configuration outside business hours — the window an attacker would pick to weaken device policy quietly.</dd>
+          <dt>When</dt><dd>Once Intune logs are flowing to Sentinel (see the ingestion field note). Standing rule.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">Automation and maintenance windows run at night too — baseline the service accounts before alerting.</dd>
+        </dl>
+<pre class="code">IntuneAuditLogs
+| where TimeGenerated &gt; ago(7d)
+| extend Hour = datetime_part("hour", TimeGenerated)
+| where Hour &gt;= 20 or Hour &lt; 7
+| where OperationName has_any ("Create","Delete","Patch")
+| project TimeGenerated, OperationName, Identity, Result = tostring(ResultType)
+| sort by TimeGenerated desc</pre>
+      </div>
+
+      <div class="qcard" data-cat="intune" data-text="device compliance falling out noncompliant intune posture endpoint">
+        <div class="qhead"><h3>Devices falling out of compliance</h3><span class="qtag">Intune</span></div>
+        <dl class="qmeta">
+          <dt>Finds</dt><dd>A rise in non-compliant devices by state and OS — posture drift, a broken policy, or tampering.</dd>
+          <dt>When</dt><dd>Daily posture check; spike investigation after a policy change.</dd>
+          <dt>Gotcha</dt><dd class="gotcha">Schema fields differ across tenants and OS — confirm the compliance columns in your workspace first.</dd>
+        </dl>
+<pre class="code">IntuneDeviceComplianceOrg
+| where TimeGenerated &gt; ago(1d)
+| where ComplianceState != "Compliant"
+| summarize Devices = dcount(DeviceId) by ComplianceState, OS
+| sort by Devices desc</pre>
+      </div>
+
+    </div>
+    <p class="qempty" id="empty">No queries match that filter yet.</p>
+  </div>
+</main>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/about.html">About</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+<script>
+(function(){
+  var cards=[].slice.call(document.querySelectorAll('.qcard'));
+  var chips=[].slice.call(document.querySelectorAll('.qchip'));
+  var q=document.getElementById('q'), count=document.getElementById('count'), empty=document.getElementById('empty');
+  var cat='all';
+  function apply(){
+    var term=(q.value||'').trim().toLowerCase(); var n=0;
+    cards.forEach(function(c){
+      var okCat = cat==='all' || c.dataset.cat===cat;
+      var hay = (c.dataset.text+' '+c.textContent).toLowerCase();
+      var okTerm = !term || hay.indexOf(term)>-1;
+      var show = okCat && okTerm;
+      c.classList.toggle('hide', !show); if(show) n++;
+    });
+    count.textContent = n + (n===1?' query':' queries');
+    empty.style.display = n===0 ? 'block':'none';
+  }
+  chips.forEach(function(ch){ ch.addEventListener('click',function(){
+    chips.forEach(function(x){x.classList.remove('on')}); ch.classList.add('on'); cat=ch.dataset.cat; apply();
+  });});
+  q.addEventListener('input', apply);
+  apply();
+})();
+</script>
+</body>
+</html>

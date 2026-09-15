@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data connectors & ingestion — Detection Engineering — Blue Team of One</title>
+<meta name="description" content="Getting sources into Microsoft Sentinel — connectors, diagnostic settings, DCRs, and the cost of each.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680&family=Newsreader:ital,opsz,wght@0,6..72,500&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=30">
+</head>
+<body>
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/"><span class="mark">Blue Team <b>of One</b></span><span class="tag">field notes · security</span></a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a><a href="/ir/">IR</a><a href="/identity/">Identity</a><a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a><a href="/detection/" aria-current="page">Detection</a><a href="/cloud/">Cloud</a><a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a><a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="wrap">
+    <div class="phead">
+      <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/detection/">Detection Engineering</a><span class="sep">›</span><span>Data connectors &amp; ingestion</span></p>
+      <p class="kicker">Section</p>
+      <h1>Data connectors &amp; ingestion</h1>
+      <p class="tagline">Getting sources into Sentinel — connectors, diagnostic settings, DCRs, and the cost of each.</p>
+    </div>
+    <div class="plist">
+      <a class="prow" href="/posts/intune-logs-into-sentinel.html">
+        <div class="meta"><span class="fmt deep">Field note</span><span class="date">September 15, 2026</span></div>
+        <h3>Getting Intune logs into Sentinel — there's no connector</h3>
+        <p>Intune routes through Diagnostic Settings, not the Content Hub — the four tables you get, which tier they land in, the cost decision that follows, and the gotchas (no backfill, ~1h latency, split roles).</p>
+        <span class="more">Read →</span>
+      </a>
+    </div>
+  </div>
+</main>
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span><a href="/">Home</a> · <a href="/about.html">About</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>
