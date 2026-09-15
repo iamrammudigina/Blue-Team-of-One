@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Proving "no standing admin" to an auditor: an Intune privileged-access evidence generator — Blue Team of One</title>
+<title>Proving "no standing admin" to an auditor: an Intune privileged-access evidence generator — Ground Truth</title>
 <meta name="description" content="A read-only PowerShell script that scans Entra role holders and correctly separates true standing admin from live PIM activations and eligible-only access — resolving group members, flagging GDAP partner grants, and writing a SHA-256'd, date-stamped HTML evidence file for access reviews.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,8 +15,8 @@
 <header class="site-head">
   <div class="site-head-inner">
     <a class="masthead" href="/">
-      <span class="mark">Blue Team <b>of One</b></span>
-      <span class="tag">field notes · security</span>
+      <span class="mark">Ground <b>Truth</b></span>
+      <span class="tag">field notes · a blue team of one</span>
     </a>
     <nav class="site-nav">
       <a href="/soc/">SOC</a>
@@ -158,6 +158,11 @@ Install-Module Microsoft.Graph -Scope CurrentUser
 </div>
 </article>
 
+<div class="connect">
+<div class="row"><span class="lab">Filed under</span><a class="lk" href="/powershell/identity-access.html"><div class="t">PowerShell Library › Identity &amp; access</div><div class="d">Browse this part of the knowledge base.</div></a></div>
+<div class="row"><span class="lab">Related</span><div class="grid2"><a class="lk" href="/posts/privileged-access-reporter.html"><div class="t">A privileged-access reporter: who holds admin, and is it standing or JIT?</div><div class="d">PowerShell Library · Identity &amp; access</div></a></div></div>
+</div>
+
 <section class="comments">
   <div class="comments-head">
     <h2>Comments</h2>
@@ -173,7 +178,7 @@ Install-Module Microsoft.Graph -Scope CurrentUser
     data-reactions-enabled="1"
     data-emit-metadata="0"
     data-input-position="bottom"
-    data-theme="dark_dimmed"
+    data-theme="light"
     data-lang="en"
     crossorigin="anonymous"
     async>
@@ -181,7 +186,7 @@ Install-Module Microsoft.Graph -Scope CurrentUser
 </section>
 
 <footer><div class="wrap">
-  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span>© 2026 Ram Mudigina · Ground Truth</span>
   <span><a href="/">Home</a> · <a href="/powershell/">PowerShell Library</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
 </div></footer>
 

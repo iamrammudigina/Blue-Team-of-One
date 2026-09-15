@@ -3,20 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ClickFix: the attack that makes the victim run the malware — Blue Team of One</title>
+<title>ClickFix: the attack that makes the victim run the malware — Ground Truth</title>
 <meta name="description" content="A 'verify you're human' page that tells the user to paste a command into the Run box. The endpoint cleanup is the easy half — the RunMRU registry key that records exactly what they pasted is the forensic gold, and the identity often lives in more than one tenant.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/assets/style.css?v=30">
+<link rel="stylesheet" href="/assets/style.css?v=31">
 </head>
 <body>
 
 <header class="site-head">
   <div class="site-head-inner">
     <a class="masthead" href="/">
-      <span class="mark">Blue Team <b>of One</b></span>
-      <span class="tag">field notes · security</span>
+      <span class="mark">Ground <b>Truth</b></span>
+      <span class="tag">field notes · a blue team of one</span>
     </a>
     <nav class="site-nav">
       <a href="/soc/">SOC</a>
@@ -168,6 +168,11 @@ reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU"</pre>
 </div>
 </article>
 
+<div class="connect">
+<div class="row"><span class="lab">Filed under</span><a class="lk" href="/endpoint/threats.html"><div class="t">Endpoint Security › Threats &amp; remediation</div><div class="d">Browse this part of the knowledge base.</div></a></div>
+<div class="row"><span class="lab">Related</span><div class="grid2"><a class="lk" href="/posts/intune-hybrid-enrollment.html"><div class="t">Hybrid Intune auto-enrollment, end to end</div><div class="d">Endpoint Security · Hardening &amp; compliance</div></a><a class="lk" href="/posts/intune-laps-deployment.html"><div class="t">Rotating every local admin password with Intune LAPS</div><div class="d">Endpoint Security · Hardening &amp; compliance</div></a><a class="lk" href="/posts/intune-windows-hello.html"><div class="t">Windows Hello for Business via Intune: the two paths, and picking the right one</div><div class="d">Endpoint Security · Hardening &amp; compliance</div></a></div></div>
+</div>
+
 <section class="comments">
   <div class="comments-head">
     <h2>Comments</h2>
@@ -183,7 +188,7 @@ reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU"</pre>
     data-reactions-enabled="1"
     data-emit-metadata="0"
     data-input-position="bottom"
-    data-theme="dark"
+    data-theme="light"
     data-lang="en"
     crossorigin="anonymous"
     async>
@@ -191,7 +196,7 @@ reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU"</pre>
 </section>
 
 <footer><div class="wrap">
-  <span>© 2026 Ram Mudigina · Blue Team of One</span>
+  <span>© 2026 Ram Mudigina · Ground Truth</span>
   <span><a href="/">Home</a> · <a href="/endpoint/">Endpoint</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
 </div></footer>
 
