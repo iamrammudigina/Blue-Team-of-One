@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Who can see what: Sentinel & Defender permissions, untangled — Blue Team of One</title>
+<meta name="description" content="Entra roles, Azure RBAC, and Defender Unified RBAC all decide what you can see in the Defender portal — and they don't agree. The three systems, how they interact, the exact 'why can't they see this?' scenarios, and how to turn URBAC on.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;680;700&family=Newsreader:ital,opsz,wght@0,6..72,500;1,6..72,500&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=30">
+<style>
+  figure.diagram{margin:30px 0; padding:0}
+  figure.diagram svg{display:block; width:100%; height:auto; background:#0c1016; border:1px solid var(--line); border-radius:12px}
+  figure.diagram figcaption{margin-top:10px; font-family:var(--mono); font-size:12.5px; color:var(--ink-3); line-height:1.5}
+  figure.diagram figcaption b{color:var(--ink-2)}
+  .matrix{overflow-x:auto; margin:22px 0}
+  table.mx{border-collapse:collapse; width:100%; min-width:660px; font-size:13px}
+  table.mx th,table.mx td{border:1px solid var(--line); padding:9px 11px; text-align:center; vertical-align:middle}
+  table.mx thead th{background:var(--card-2); color:var(--accent); font-family:var(--mono); font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.02em}
+  table.mx tbody th{text-align:left; background:var(--bg-2); color:var(--ink); font-family:var(--sans); font-weight:600; font-size:13px; min-width:190px}
+  table.mx tbody th small{display:block; color:var(--ink-3); font-family:var(--mono); font-weight:400; font-size:10.5px; margin-top:2px}
+  .yes{color:var(--verified); font-weight:700} .no{color:var(--severity); font-weight:700} .part{color:var(--warn); font-weight:700}
+  .mxnote{font-family:var(--mono); font-size:11.5px; color:var(--ink-3); line-height:1.6; margin:10px 0 0}
+  .mxnote b{color:var(--ink-2)}
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/"><span class="mark">Blue Team <b>of One</b></span><span class="tag">field notes · security</span></a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a><a href="/ir/">IR</a><a href="/identity/">Identity</a><a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a><a href="/detection/" aria-current="page">Detection</a><a href="/cloud/">Cloud</a><a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a><a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/detection/">Detection Engineering</a><span class="sep">›</span><a href="/detection/sentinel-platform.html">Sentinel, end to end</a></p>
+    <p class="eyebrow"><span class="dot"></span>Microsoft Defender · unified RBAC</p>
+    <h1>Who can see what: <em>Sentinel &amp; Defender permissions, untangled</em></h1>
+    <p class="lede">Now that Sentinel lives inside the Defender portal, <em>three</em> separate permission systems decide what any given person can see — and they don't agree with each other. Almost every "why can't I see this?" ticket is one system granting access while another silently denies it. Here's the map, the exact scenarios, and how to turn the new model on without locking your own team out.</p>
+    <div class="byline"><span><b>Ram Mudigina</b></span><span>September 15, 2026</span><span>~16 min read · reference</span></div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+  <p>The permission model in the unified portal isn't harder than what it replaced — it's more <em>layered</em>, and the layers answer different questions. The trouble is that nobody tells you there are three of them, so you grant someone a role that feels sweeping, they open the portal, and half of it is greyed out. Untangling it starts with naming the three systems and, more importantly, knowing which one is the authority for which surface.</p>
+
+  <div class="analogy">
+    <p class="tag">Mental model</p>
+    <p>Three sets of keys, three locksmiths. <strong>Entra roles</strong> are the building's master keys (directory-wide). <strong>Azure RBAC</strong> is the locksmith for the Sentinel wing only. <strong>Defender Unified RBAC</strong> is a newer locksmith who's rekeying the whole building one wing at a time. A key that opens everything today opens only what its locksmith still controls tomorrow — and once a wing is rekeyed, the old master key stops working on that wing's doors.</p>
+  </div>
+
+  <h2 class="head"><span class="num">01</span>The three systems, and what each governs</h2>
+  <p class="sub">Microsoft's own framing: the Defender portal unifies three RBAC systems that continue to coexist. Which one is the authority depends entirely on the surface — and on whether you've activated the new model.</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 920 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three permission systems: Entra ID roles govern Defender functionality and are directory-wide; Azure RBAC governs the Sentinel workspace; Defender Unified RBAC spans all Defender workloads plus the data lake and, once activated, Sentinel too — replacing the legacy authority for that surface.">
+      <text x="24" y="28" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#7d8a9b" letter-spacing=".05em">THREE SYSTEMS, ONE PORTAL</text>
+      <!-- Entra -->
+      <rect x="20" y="46" width="280" height="112" rx="10" fill="#12161c" stroke="#2f3742"/>
+      <text x="36" y="70" font-family="JetBrains Mono, monospace" font-size="12.5" font-weight="700" fill="#aab3c0">MICROSOFT ENTRA ROLES</text>
+      <text x="36" y="90" font-family="Inter, sans-serif" font-size="11.5" fill="#8592a3">Global Admin · Security Admin ·</text>
+      <text x="36" y="106" font-family="Inter, sans-serif" font-size="11.5" fill="#8592a3">Security Operator / Reader</text>
+      <text x="36" y="130" font-family="Inter, sans-serif" font-size="11" fill="#7d8a9b">Directory-wide. Governs Defender</text>
+      <text x="36" y="145" font-family="Inter, sans-serif" font-size="11" fill="#7d8a9b">functionality (e.g. device groups).</text>
+      <!-- Azure RBAC -->
+      <rect x="320" y="46" width="280" height="112" rx="10" fill="#12161c" stroke="#2f3742"/>
+      <text x="336" y="70" font-family="JetBrains Mono, monospace" font-size="12.5" font-weight="700" fill="#aab3c0">AZURE RBAC</text>
+      <text x="336" y="90" font-family="Inter, sans-serif" font-size="11.5" fill="#8592a3">Sentinel Reader · Responder ·</text>
+      <text x="336" y="106" font-family="Inter, sans-serif" font-size="11.5" fill="#8592a3">Contributor (+ Log Analytics)</text>
+      <text x="336" y="130" font-family="Inter, sans-serif" font-size="11" fill="#7d8a9b">Scoped to the workspace / RG.</text>
+      <text x="336" y="145" font-family="Inter, sans-serif" font-size="11" fill="#7d8a9b">Governs Sentinel SIEM.</text>
+      <!-- URBAC -->
+      <rect x="620" y="46" width="280" height="112" rx="10" fill="#0b1a25" stroke="#5ac8fa"/>
+      <text x="636" y="70" font-family="JetBrains Mono, monospace" font-size="12.5" font-weight="700" fill="#5ac8fa">DEFENDER UNIFIED RBAC</text>
+      <text x="636" y="90" font-family="Inter, sans-serif" font-size="11.5" fill="#cfe6f7">One role model, per-workload</text>
+      <text x="636" y="106" font-family="Inter, sans-serif" font-size="11.5" fill="#cfe6f7">scope + data sources</text>
+      <text x="636" y="130" font-family="Inter, sans-serif" font-size="11" fill="#9fc7e0">Spans all Defender workloads,</text>
+      <text x="636" y="145" font-family="Inter, sans-serif" font-size="11" fill="#9fc7e0">the data lake, and now Sentinel.</text>
+      <!-- surfaces row -->
+      <text x="24" y="196" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#7d8a9b" letter-spacing=".05em">GOVERNS WHICH SURFACE</text>
+      <g font-family="Inter, sans-serif" font-size="11">
+        <rect x="20" y="208" width="180" height="34" rx="7" fill="#0e141b" stroke="#2f3742"/><text x="110" y="230" text-anchor="middle" fill="#cdd6e3">Endpoints · Email · Identities</text>
+        <rect x="212" y="208" width="150" height="34" rx="7" fill="#0e141b" stroke="#2f3742"/><text x="287" y="230" text-anchor="middle" fill="#cdd6e3">Sentinel SIEM</text>
+        <rect x="374" y="208" width="150" height="34" rx="7" fill="#0e141b" stroke="#2f3742"/><text x="449" y="230" text-anchor="middle" fill="#cdd6e3">Sentinel data lake</text>
+        <rect x="536" y="208" width="180" height="34" rx="7" fill="#0e141b" stroke="#2f3742"/><text x="626" y="230" text-anchor="middle" fill="#cdd6e3">Row-level scoping</text>
+      </g>
+      <!-- who governs arrows (small labels) -->
+      <text x="110" y="262" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#8592a3">Entra ↔ URBAC</text>
+      <text x="287" y="262" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#8592a3">Azure RBAC → URBAC*</text>
+      <text x="449" y="262" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#8fc0ff">URBAC only</text>
+      <text x="626" y="262" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#8fc0ff">URBAC only</text>
+      <!-- switch -->
+      <rect x="20" y="282" width="880" height="26" rx="6" fill="#0b1f15" stroke="#1f5a3a"/>
+      <text x="34" y="299" font-family="JetBrains Mono, monospace" font-size="11" fill="#8fdca4">* the switch — activate Unified RBAC (per workload; per Sentinel workspace) and it becomes the authority, replacing the legacy model for that surface</text>
+    </svg>
+    <figcaption><b>Which locksmith holds the key depends on the door — and the switch.</b> At onboarding your Azure RBAC for Sentinel carries across unchanged. The moment you activate Unified RBAC for a workload (or a Sentinel workspace), URBAC becomes the sole authority for it and the legacy assignments stop being required.</figcaption>
+  </figure>
+
+  <p>The baseline is gentler than the diagram suggests: if you connect Sentinel to the Defender portal and do nothing else, your existing <strong>Azure RBAC</strong> permissions carry across unchanged, and a SIEM-only team with no Defender XDR and no data lake has <em>no permission work to do</em>. The layering only starts when your needs go past that — XDR access alongside Sentinel needs Entra roles or URBAC; the data lake needs URBAC; row-level scoping needs URBAC.</p>
+
+  <h2 class="head"><span class="num">02</span>The switch that changes who's in charge</h2>
+  <p class="sub">Until you activate Unified RBAC for a workload, the legacy model applies. Activate it, and that workload is <em>fully</em> governed by URBAC — with two consequences people don't expect.</p>
+
+  <p>Unified RBAC for Sentinel SIEM went to public preview in April 2026, and it's <strong>opt-in and per-workspace</strong>. Activation lives at <span class="k">System → Permissions → Roles → Activate workloads</span>, where you pick which Sentinel workspaces to enable. Do it, and URBAC becomes the primary source of permissions for that workspace, replacing Azure RBAC. Two things bite here:</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 920 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Evaluation flow: when a user opens a surface, if it is the data lake it is always Unified RBAC; if it is a Sentinel SIEM surface, URBAC governs when activated for that workspace otherwise Azure RBAC with Sentinel Reader as the minimum; if it is a Defender XDR surface, URBAC governs when activated otherwise the Entra role.">
+      <defs><marker id="e1" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9z" fill="#5ac8fa"/></marker></defs>
+      <text x="24" y="28" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#7d8a9b" letter-spacing=".05em">USER OPENS A SURFACE — WHICH SYSTEM DECIDES?</text>
+      <g font-family="Inter, sans-serif">
+        <rect x="20" y="44" width="150" height="48" rx="9" fill="#12161c" stroke="#2f3742"/><text x="95" y="73" text-anchor="middle" font-size="12" fill="#e8ebf0">Which surface?</text>
+        <!-- data lake -->
+        <line x1="170" y1="60" x2="214" y2="60" stroke="#5ac8fa" stroke-width="2" marker-end="url(#e1)"/>
+        <text x="192" y="52" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#7d8a9b">lake</text>
+        <rect x="218" y="40" width="260" height="40" rx="8" fill="#0b1a25" stroke="#5ac8fa"/><text x="348" y="64" text-anchor="middle" font-size="11.5" fill="#8fc0ff">Data lake → Unified RBAC, always</text>
+        <!-- sentinel -->
+        <line x1="95" y1="92" x2="95" y2="120" stroke="#5ac8fa" stroke-width="2" marker-end="url(#e1)"/>
+        <rect x="20" y="122" width="150" height="46" rx="8" fill="#12161c" stroke="#2f3742"/><text x="95" y="141" text-anchor="middle" font-size="11.5" fill="#cdd6e3">Sentinel SIEM</text><text x="95" y="157" text-anchor="middle" font-size="10" fill="#7d8a9b">URBAC activated?</text>
+        <line x1="170" y1="136" x2="214" y2="136" stroke="#5ac8fa" stroke-width="2" marker-end="url(#e1)"/><text x="192" y="128" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#45d67a">yes</text>
+        <rect x="218" y="118" width="215" height="36" rx="8" fill="#0b1a25" stroke="#5ac8fa"/><text x="325" y="140" text-anchor="middle" font-size="11" fill="#8fc0ff">URBAC role governs</text>
+        <line x1="95" y1="168" x2="95" y2="192" stroke="#5ac8fa" stroke-width="2" marker-end="url(#e1)"/><text x="108" y="184" font-family="JetBrains Mono, monospace" font-size="9" fill="#f0868a">no</text>
+        <rect x="20" y="194" width="413" height="36" rx="8" fill="#211b0b" stroke="#6b551d"/><text x="34" y="216" font-size="11" fill="#e0c98a">Azure RBAC — min. <tspan font-family="JetBrains Mono, monospace" fill="#e0b13c">Sentinel Reader</tspan> or the menu is hidden</text>
+        <!-- xdr -->
+        <line x1="95" y1="230" x2="95" y2="252" stroke="#5ac8fa" stroke-width="2" marker-end="url(#e1)"/>
+        <rect x="20" y="254" width="150" height="40" rx="8" fill="#12161c" stroke="#2f3742"/><text x="95" y="272" text-anchor="middle" font-size="11.5" fill="#cdd6e3">Defender XDR</text><text x="95" y="287" text-anchor="middle" font-size="10" fill="#7d8a9b">URBAC activated?</text>
+        <line x1="170" y1="274" x2="214" y2="274" stroke="#5ac8fa" stroke-width="2" marker-end="url(#e1)"/>
+        <rect x="218" y="256" width="340" height="36" rx="8" fill="#0e141b" stroke="#2f3742"/><text x="388" y="278" text-anchor="middle" font-size="11" fill="#cdd6e3">yes → URBAC role · no → the Entra role</text>
+        <!-- note -->
+        <rect x="600" y="118" width="300" height="112" rx="9" fill="#0e141b" stroke="#2f3742"/>
+        <text x="616" y="140" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700" fill="#8592a3">TWO THAT SURPRISE PEOPLE</text>
+        <text x="616" y="162" font-size="10.5" fill="#aab3c0">• Global Admin gets no automatic</text>
+        <text x="616" y="176" font-size="10.5" fill="#aab3c0">&#160;&#160;workspace access — only the right</text>
+        <text x="616" y="190" font-size="10.5" fill="#aab3c0">&#160;&#160;to assign it (incl. to self).</text>
+        <text x="616" y="210" font-size="10.5" fill="#aab3c0">• Edit Azure RBAC after activation</text>
+        <text x="616" y="224" font-size="10.5" fill="#aab3c0">&#160;&#160;→ sync errors. Manage in one place.</text>
+      </g>
+    </svg>
+    <figcaption><b>The evaluation path <em>is</em> the answer to every "why can't I see this?"</b> Trace the surface the person opened down to the system that actually decides, and the mystery resolves — it's almost always the data lake needing URBAC, or Sentinel needing its Azure-RBAC minimum, or a workload that's been rekeyed to URBAC without the person getting a URBAC role.</p>
+    </figcaption>
+  </figure>
+
+  <div class="caveat">
+    <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+    <div><h3>It's arriving whether you opt in or not</h3><p>Microsoft is making Unified RBAC the <strong>default</strong>. Tenants are being auto-enabled roughly 30 days after an in-portal notification, with the global rollout running late September to late December 2026 — legacy roles are auto-imported for you. So "we'll deal with URBAC later" isn't a plan; the switch flips on a clock you don't fully control. Validate your imported roles <em>before</em> the activation date, not after someone loses access.</p></div>
+  </div>
+
+  <h2 class="head"><span class="num">03</span>"Why can't they see it?" — the matrix</h2>
+  <p class="sub">Five real personas against the surfaces of the portal. Every ✗ below is a genuine, documented gap that generates a ticket — and the footnotes say exactly why.</p>
+
+  <div class="matrix">
+  <table class="mx">
+    <thead>
+      <tr><th>Persona</th><th>Sentinel SIEM</th><th>Data lake</th><th>XDR incidents</th><th>Endpoints</th><th>Email &amp; collab</th><th>Identities</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>Entra Security Reader <small>directory role only</small></th>
+        <td class="no">✗<sup>1</sup></td><td class="no">✗<sup>2</sup></td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+      <tr><th>Azure RBAC Sentinel Responder <small>workspace role only</small></th>
+        <td class="yes">✓</td><td class="no">✗<sup>2</sup></td><td class="no">✗<sup>3</sup></td><td class="no">✗<sup>3</sup></td><td class="no">✗<sup>3</sup></td><td class="no">✗<sup>3</sup></td></tr>
+      <tr><th>Custom URBAC role <small>SecOps read + Endpoints scope</small></th>
+        <td class="no">✗<sup>4</sup></td><td class="no">✗<sup>4</sup></td><td class="yes">✓</td><td class="yes">✓</td><td class="no">✗<sup>4</sup></td><td class="no">✗<sup>4</sup></td></tr>
+      <tr><th>Global Admin <small>URBAC active, no self-assignment</small></th>
+        <td class="no">✗<sup>5</sup></td><td class="no">✗<sup>5</sup></td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+      <tr><th>Target state <small>Sentinel Responder + URBAC SecOps + data ops</small></th>
+        <td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="mxnote">
+    <b>1</b> — Sentinel's <em>minimum</em> is the Azure RBAC <b>Sentinel Reader</b> role. Without it the Sentinel menu isn't even visible in the Defender portal, no matter what Defender access the Entra role grants. This is the single most common "I have access but can't see Sentinel" ticket.<br>
+    <b>2</b> — The data lake is an independent layer: it always needs a Defender <b>Unified RBAC</b> role, regardless of your SIEM permission model.<br>
+    <b>3</b> — A workspace-scoped Sentinel role grants nothing on Defender XDR workloads — those need an Entra role or a URBAC role. Sentinel access ≠ XDR access.<br>
+    <b>4</b> — URBAC's whole point is granularity: a custom role scoped to Endpoints leaves Email, Identities, <em>and</em> Sentinel dark. Scope is a feature, and the greyed-out sections are it working.<br>
+    <b>5</b> — Under URBAC, Global Admin gets <b>no automatic</b> Sentinel workspace access — only the right to assign it (including to itself). The old "GA sees everything" reflex is gone for Sentinel.
+  </p>
+
+  <h2 class="head"><span class="num">04</span>Turning it on without locking yourself out</h2>
+  <p class="sub">Activation is a few clicks; the discipline is importing and validating first, and remembering what URBAC still doesn't cover.</p>
+
+  <p>You need <strong>Global Admin or Security Admin</strong> in Entra to activate. From <span class="k">System → Permissions → Roles</span>, use <strong>Activate workloads</strong>, toggle each workload one at a time, and for Sentinel choose <strong>View Workspaces</strong> and select which to enable. Before you flip anything, use Microsoft's <strong>import function</strong> — it recreates your existing Azure RBAC (and per-workload) roles inside URBAC automatically, so you validate a mirror of what you already have rather than rebuilding from scratch. Check every person maps to the role and scope you expect, <em>then</em> activate.</p>
+
+  <div class="caveat">
+    <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+    <div><h3>Three Sentinel roles still live in Azure — plan for dual management</h3><p><strong>Playbook Operator</strong>, <strong>Automation Contributor</strong>, and <strong>Workbook Contributor</strong> aren't in Unified RBAC yet. If anyone relies on them, you keep managing those specific assignments in the Azure portal even after activating URBAC everywhere else. That dual-management posture is workable — but undocumented, it becomes the blind spot where a playbook silently stops running because someone "cleaned up" Azure roles.</p></div>
+  </div>
+
+  <h2 class="head"><span class="num">05</span>The MSSP angle: many tenants, one clock</h2>
+  <p class="sub">If you operate across client tenants, this lands on all of them — and the multi-tenant access story is mid-transition.</p>
+
+  <p>Two things matter across a fleet of tenants. First, <strong>auto-enablement hits every one of them</strong> on Microsoft's schedule, so the move from "we'll standardise RBAC eventually" to "URBAC is on in this client next month" is not yours to defer — the win is getting ahead of it with a consistent, imported, least-privilege role model you apply per tenant. Second, <strong>cross-tenant access is changing</strong>: Entra B2B remains the generally-available path for reaching Sentinel data in a client's Defender portal, and a new <em>Defender-native GDAP</em> model (consent-based, three-step handshake) is in preview for delegating both Sentinel and Defender from one place. The older Azure Lighthouse GDAP integration still does <em>not</em> surface Sentinel data in the Defender portal — though Lighthouse itself is very much alive for cross-workspace KQL and Azure resource access. And once URBAC is active, <strong>row-level scoping</strong> lets several teams share one workspace while each sees only its slice — the capability that finally makes shared-workspace multi-tenancy defensible.</p>
+
+  <div class="takeaway">
+    <p class="tag">The one-line model</p>
+    <p>Three systems, one portal: Entra roles for Defender functionality, Azure RBAC for Sentinel SIEM, Unified RBAC for everything once you activate it — and the data lake always. Every "why can't they see this?" is a surface being decided by a system the person doesn't hold a key to. Trace the surface to the system, and the mystery dissolves.</p>
+  </div>
+
+  <div class="sources"><h2>Sources &amp; further reading</h2><ul>
+    <li><a href="https://learn.microsoft.com/en-us/defender-xdr/manage-rbac">Microsoft Defender unified RBAC</a><span>activation, precedence, and how workloads are governed</span></li>
+    <li><a href="https://learn.microsoft.com/en-us/defender-xdr/activate-defender-rbac">Activate Defender unified RBAC</a><span>the per-workload / per-workspace activation steps</span></li>
+    <li><a href="https://learn.microsoft.com/en-us/defender-xdr/compare-rbac-roles">Map unified RBAC permissions</a><span>Sentinel role mapping and the roles still managed in Azure</span></li>
+    <li><a href="https://learn.microsoft.com/en-us/azure/sentinel/roles">Roles and permissions in Microsoft Sentinel</a><span>the Azure RBAC baseline that carries across</span></li>
+    <li><a href="https://learn.microsoft.com/en-us/unified-secops/overview-plan">Plan for unified security operations</a><span>the three-system model and the Sentinel Reader minimum</span></li>
+  </ul></div>
+
+</div>
+</article>
+
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname" data-strict="0" data-reactions-enabled="1" data-emit-metadata="0"
+    data-input-position="bottom" data-theme="dark_dimmed" data-lang="en" crossorigin="anonymous" async>
+  </script>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Ram Mudigina · Blue Team of One</span>
+    <span><a href="/index.html">Home</a> · <a href="/about.html">About</a></span>
+  </div>
+</footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>
