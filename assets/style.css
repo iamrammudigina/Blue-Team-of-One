@@ -512,3 +512,14 @@ footer{background:var(--bg-2); border-top:1px solid var(--line)} footer,footer .
 .connect .lk.next{background:var(--signal-bg); border-color:#bcdcd6} .connect .lk.next .t{color:var(--accent)}
 .connect .grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px}
 @media(max-width:640px){.connect .row{grid-template-columns:1fr} .connect .grid2{grid-template-columns:1fr}}
+
+
+/* ---- Paper theme: syntax colours for the dark code inset + legible badge ink ---- */
+:root{ --stop-ink:#b1452f; --warn-ink:#9c7b3f; --go-ink:#2e7d52; }
+pre .cm,.code .cm{color:#7d8a9b; font-style:italic}
+pre .ck,.code .ck{color:#5ac8fa}
+pre .cs,.code .cs{color:#e0b07a}
+pre .cv,.code .cv{color:#6fd08c}
+pre .cr,.code .cr{color:#f0868a}
+pre .cp,.code .cp{color:#c9d3df}
+pre b,.code b{color:#9fdcff}

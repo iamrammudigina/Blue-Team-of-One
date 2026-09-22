@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>"Device authentication failed": hybrid join, the PRT, and Intune, end to end — Ground Truth</title>
+<meta name="description" content="How a hybrid-joined Windows device gets its identity, how that identity becomes a user's Primary Refresh Token, and how both feed Intune. Then a real AADSTS50155 case: the evidence, the reasoning, the fix, and the validation.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;680;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=32">
+<style>
+  /* scoped diagram styling — figures aren't styled globally */
+  figure.diagram{margin:30px 0; padding:0}
+  figure.diagram .scroll{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  figure.diagram svg{display:block; width:100%; min-width:640px; height:auto;
+    background:#0A1E42; border:1px solid #1E3E70; border-radius:10px}
+  figure.diagram figcaption{margin-top:10px; font-family:var(--mono); font-size:12.5px; color:var(--ink-3); line-height:1.5}
+  figure.diagram figcaption b{color:var(--ink-2)}
+  .dg .lab{font-family:var(--mono); font-size:10.5px; letter-spacing:.08em; fill:#7C8DB3}
+  .dg .h{font-family:var(--mono); font-size:13px; font-weight:700; fill:#EAEEF6}
+  .dg .b{font-family:var(--sans); font-size:12.5px; fill:#B7C4DD}
+  .dg .s{font-family:var(--sans); font-size:11.5px; fill:#7C8DB3}
+  .dg .m{font-family:var(--mono); font-size:11px; fill:#B7C4DD}
+  .dg .pill{font-family:var(--mono); font-size:10.5px; font-weight:700}
+  .dg .g{fill:#6FD08C} .dg .a{fill:#F2D45C} .dg .c{fill:#5AC8DA} .dg .v{fill:#b79bff} .dg .r{fill:#F76F72} .dg .x{fill:#7C8DB3}
+  pre .cr{color:#f0868a}
+  .tldr{border:1px solid var(--line); border-radius:8px; background:var(--bg-2); padding:6px 18px; margin:26px 0}
+  .tldr li{margin:10px 0; color:var(--ink-2)}
+  .tldr b{color:var(--ink)}
+  @media (max-width:640px){ .mr{grid-template-columns:1fr}
+    .cmp{font-size:12.5px} .cmp th,.cmp td{padding:8px 9px; overflow-wrap:anywhere}
+    .k.long{white-space:normal; overflow-wrap:anywhere} }
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Ground <b>Truth</b></span>
+      <span class="tag">field notes · a blue team of one</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/" aria-current="page">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/endpoint/">Endpoint Security</a><span class="sep">›</span><a href="/endpoint/hardening.html">Hardening &amp; compliance</a></p>
+    <p class="eyebrow"><span class="dot"></span>Deep dive + field case · device identity</p>
+    <h1>"Device authentication failed": hybrid join, the PRT and Intune, <em>end to end</em></h1>
+    <p class="lede">A user can't sign in to anything. Windows says the device couldn't authenticate and offers to register it, then the registration fails. The tempting fix is to wipe or retire the laptop. The right fix takes twenty minutes and touches no user data, but only once you understand how the laptop's identity is actually built.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>September 22, 2026</span>
+      <span>~13 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>This post has two halves. The first half is the machinery: how a domain-joined Windows PC becomes a device Entra trusts, how that trust turns into the user's <strong>Primary Refresh Token</strong> (PRT), and how the PRT is what gets the device into Intune. The second half is a real ticket where that chain broke, walked through the way it was actually worked: the evidence, what each clue meant, the fix, and how we proved it was fixed.</p>
+
+<p>If you only remember one idea, make it this one: <strong>device identity, user token and device management are a chain, not three separate features.</strong> Break the first link and everything after it fails too, with error messages that point at the wrong place.</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 236" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The dependency chain: hybrid join, then PRT, then Intune enrollment, then compliance written to Entra, then app sign-in. The first link broke, so every later link failed with it.">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#7C8DB3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <text class="lab" x="24" y="32">THE DEPENDENCY CHAIN · EACH LINK NEEDS THE ONE BEFORE IT</text>
+
+  <rect x="33" y="52" width="118" height="100" rx="10" fill="#26131A" stroke="#F76F72" stroke-width="1.4"/>
+  <circle cx="53" cy="74" r="10" fill="#F76F72"/><text x="53" y="78" text-anchor="middle" class="pill" fill="#071733">1</text>
+  <text class="h" x="70" y="79">Join</text>
+  <text class="b" x="47" y="104">hybrid join,</text>
+  <text class="b" x="47" y="120">device identity</text>
+  <text class="m r" x="47" y="140">AzureAdJoined</text>
+
+  <line x1="153" y1="102" x2="165" y2="102" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+
+  <rect x="167" y="52" width="118" height="100" rx="10" fill="#0C244C" stroke="#F76F72" stroke-opacity=".45" stroke-dasharray="4 4" stroke-width="1.2"/>
+  <circle cx="187" cy="74" r="10" fill="#1E3E70"/><text x="187" y="78" text-anchor="middle" class="pill" fill="#EAEEF6">2</text>
+  <text class="h" x="204" y="79">PRT</text>
+  <text class="b" x="181" y="104">user's token,</text>
+  <text class="b" x="181" y="120">device-bound</text>
+  <text class="m" x="181" y="140">AzureAdPrt</text>
+
+  <line x1="287" y1="102" x2="299" y2="102" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+
+  <rect x="301" y="52" width="118" height="100" rx="10" fill="#0C244C" stroke="#F76F72" stroke-opacity=".45" stroke-dasharray="4 4" stroke-width="1.2"/>
+  <circle cx="321" cy="74" r="10" fill="#1E3E70"/><text x="321" y="78" text-anchor="middle" class="pill" fill="#EAEEF6">3</text>
+  <text class="h" x="338" y="79">Intune</text>
+  <text class="b" x="315" y="104">enrolled, with</text>
+  <text class="b" x="315" y="120">a device record</text>
+  <text class="m" x="315" y="140">MdmUrl</text>
+
+  <line x1="421" y1="102" x2="433" y2="102" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+
+  <rect x="435" y="52" width="118" height="100" rx="10" fill="#0C244C" stroke="#F76F72" stroke-opacity=".45" stroke-dasharray="4 4" stroke-width="1.2"/>
+  <circle cx="455" cy="74" r="10" fill="#1E3E70"/><text x="455" y="78" text-anchor="middle" class="pill" fill="#EAEEF6">4</text>
+  <text class="h" x="472" y="79">Comply</text>
+  <text class="b" x="449" y="104">state written</text>
+  <text class="b" x="449" y="120">back to Entra</text>
+  <text class="m" x="449" y="140">isCompliant</text>
+
+  <line x1="555" y1="102" x2="567" y2="102" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+
+  <rect x="569" y="52" width="118" height="100" rx="10" fill="#0C244C" stroke="#F76F72" stroke-opacity=".45" stroke-dasharray="4 4" stroke-width="1.2"/>
+  <circle cx="589" cy="74" r="10" fill="#1E3E70"/><text x="589" y="78" text-anchor="middle" class="pill" fill="#EAEEF6">5</text>
+  <text class="h" x="606" y="79">Sign-in</text>
+  <text class="b" x="583" y="104">CA evaluates,</text>
+  <text class="b" x="583" y="120">SSO to apps</text>
+  <text class="m" x="583" y="140">Outlook, Teams</text>
+
+  <path d="M40 170 v8 h104 v-8" fill="none" stroke="#F76F72" stroke-width="1.2"/>
+  <text class="m r" x="40" y="198">broke here</text>
+  <text class="s" x="40" y="216">Entra stopped recognising the device</text>
+  <path d="M174 170 v8 h506 v-8" fill="none" stroke="#F76F72" stroke-opacity=".45" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <text class="s" x="427" y="198" text-anchor="middle">…so every link after it failed too, and the user only saw the last one</text>
+</svg>
+</div>
+<figcaption><b>The whole post in one picture.</b> The user reported link 5: "I can't sign in to Outlook." The cause was link 1. Fixing anything in between (resetting her password, re-licensing, wiping the laptop) would not have helped.</figcaption>
+</figure>
+
+<h2 class="head"><span class="num">01</span>One laptop, four records</h2>
+<p class="sub">Before the mechanism, the cast. Most confusion comes from not knowing which object is which.</p>
+
+<p>A hybrid-joined, Intune-managed, Autopilot-registered laptop is represented in <strong>four different places</strong>. They share a name or a serial number, which makes them look like duplicates, but each one does a different job and they are linked in a specific order.</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 372" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The laptop holds a private device key in its TPM and a device certificate. It writes the certificate to its AD computer object, Entra Connect syncs that into the Entra device object, the Intune record links to the Entra device by device ID, and a separate Autopilot placeholder is created from the hardware hash.">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#7C8DB3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <text class="lab" x="24" y="24">ONE PHYSICAL DEVICE · FOUR RECORDS</text>
+
+  <rect x="24" y="40" width="190" height="310" rx="14" fill="#0C2417" stroke="#6FD08C" stroke-width="1.2"/>
+  <text class="h" x="44" y="68">The laptop</text>
+  <text class="lab" x="44" y="86">WINDOWS + TPM</text>
+  <rect x="44" y="102" width="150" height="66" rx="8" fill="#071733" stroke="#6FD08C" stroke-opacity=".6"/>
+  <text class="m g" x="56" y="122">device key</text>
+  <text class="s" x="56" y="140">private half, sealed</text>
+  <text class="s" x="56" y="156">in the TPM</text>
+  <rect x="44" y="178" width="150" height="66" rx="8" fill="#071733" stroke="#6FD08C" stroke-opacity=".6"/>
+  <text class="m g" x="56" y="198">device cert</text>
+  <text class="s" x="56" y="216">subject CN =</text>
+  <text class="s" x="56" y="232">the device ID</text>
+  <text class="s" x="44" y="268">The source of truth.</text>
+  <text class="s" x="44" y="286">Every other record is</text>
+  <text class="s" x="44" y="304">only valid while it</text>
+  <text class="s" x="44" y="322">matches what's in here.</text>
+
+  <rect x="380" y="40" width="316" height="58" rx="10" fill="#241F0C" stroke="#F2D45C" stroke-width="1.1"/>
+  <text class="h" x="398" y="64">AD computer object</text>
+  <text class="m a" x="398" y="84">userCertificate = public cert</text>
+
+  <rect x="380" y="124" width="316" height="58" rx="10" fill="#0A2733" stroke="#5AC8DA" stroke-width="1.1"/>
+  <text class="h" x="398" y="148">Entra device object</text>
+  <text class="m c" x="398" y="168">device ID · public key · join type</text>
+
+  <rect x="380" y="208" width="316" height="58" rx="10" fill="#1A1640" stroke="#b79bff" stroke-width="1.1"/>
+  <text class="h" x="398" y="232">Intune device record</text>
+  <text class="m v" x="398" y="252">points at an Entra device ID</text>
+
+  <rect x="380" y="292" width="316" height="58" rx="10" fill="#0C244C" stroke="#7C8DB3" stroke-dasharray="4 4" stroke-width="1.1"/>
+  <text class="h" x="398" y="316">Autopilot placeholder</text>
+  <text class="m x" x="398" y="336">named after the serial number</text>
+
+  <text class="m" x="297" y="62" text-anchor="middle">writes cert</text>
+  <line x1="216" y1="69" x2="376" y2="69" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+  <text class="m" x="297" y="146" text-anchor="middle">registers key</text>
+  <line x1="216" y1="153" x2="376" y2="153" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+  <text class="m" x="297" y="230" text-anchor="middle">MDM check-ins</text>
+  <line x1="216" y1="237" x2="376" y2="237" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+  <text class="m x" x="297" y="314" text-anchor="middle">hardware hash, once</text>
+  <line x1="216" y1="321" x2="376" y2="321" stroke="#7C8DB3" stroke-width="1.3" stroke-dasharray="4 4" marker-end="url(#a2)"/>
+
+  <line x1="672" y1="100" x2="672" y2="121" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+  <text class="s" x="664" y="115" text-anchor="end">Entra Connect sync</text>
+  <line x1="672" y1="206" x2="672" y2="185" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+  <text class="s" x="664" y="199" text-anchor="end">linked by device ID</text>
+</svg>
+</div>
+<figcaption><b>Read it top to bottom.</b> The laptop writes its public cert to AD, Entra Connect carries it into Entra, and Intune hangs off the Entra device ID. The Autopilot placeholder sits off to the side. It was created from an uploaded hardware hash and never signs in.</figcaption>
+</figure>
+
+<table class="cmp">
+  <tr><th>Record</th><th>What it is for</th><th>If you delete it</th></tr>
+  <tr><td><strong>AD computer object</strong></td><td>Domain membership, GPOs, and the carrier for <span class="k">userCertificate</span></td><td>The device falls off the domain. Don't.</td></tr>
+  <tr><td><strong>Entra device object</strong></td><td>What Entra checks when the device signs a request. Holds the public key, join type and compliance flag</td><td>Device authentication fails immediately (the subject of this post)</td></tr>
+  <tr><td><strong>Intune record</strong></td><td>Policies, apps, compliance, BitLocker/LAPS settings</td><td>The device unenrolls at next check-in. User data is untouched</td></tr>
+  <tr><td><strong>Autopilot placeholder</strong></td><td>Remembers "this hardware belongs to us" for future resets</td><td>Autopilot no longer recognises the hardware at the next reimage</td></tr>
+</table>
+
+<h2 class="head"><span class="num">02</span>How hybrid join actually works</h2>
+<p class="sub">The device gets its identity from a key it generates itself, carried to Entra by a cert in AD.</p>
+
+<p>"Hybrid joined" means the PC is joined to on-prem AD <em>and</em> registered in Entra as the same machine. In a managed (non-federated) tenant, the registration leg is an elegant bit of engineering: the device never sends a password anywhere. It proves who it is with a key only it holds, and it uses AD plus Entra Connect as the trusted courier that introduces that key to Entra.</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 486" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sequence diagram of hybrid join across four parties: device, domain controller, Entra Connect and Entra device registration service. The device reads the SCP, generates a TPM key and self-signed cert, writes the cert to AD, Entra Connect syncs it to create a pending device object, then on the next run the device proves possession of the key and registration completes.">
+  <defs>
+    <marker id="a3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#B7C4DD" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <rect x="34" y="28" width="132" height="36" rx="8" fill="#0C2417" stroke="#6FD08C"/><text class="h" x="100" y="51" text-anchor="middle">Device (TPM)</text>
+  <rect x="214" y="28" width="132" height="36" rx="8" fill="#241F0C" stroke="#F2D45C"/><text class="h" x="280" y="51" text-anchor="middle">Domain ctrl</text>
+  <rect x="384" y="28" width="132" height="36" rx="8" fill="#241F0C" stroke="#F2D45C" stroke-dasharray="4 3"/><text class="h" x="450" y="51" text-anchor="middle">Entra Connect</text>
+  <rect x="554" y="28" width="132" height="36" rx="8" fill="#0A2733" stroke="#5AC8DA"/><text class="h" x="620" y="51" text-anchor="middle">Entra (DRS)</text>
+  <g stroke="#1E3E70" stroke-dasharray="3 5" stroke-width="1.2">
+    <line x1="100" y1="66" x2="100" y2="470"/><line x1="280" y1="66" x2="280" y2="470"/>
+    <line x1="450" y1="66" x2="450" y2="470"/><line x1="620" y1="66" x2="620" y2="470"/>
+  </g>
+
+  <text class="lab" x="24" y="90">PASS 1 · DEVICE INTRODUCES ITSELF VIA AD</text>
+
+  <text class="m" x="190" y="108" text-anchor="middle">① read SCP: which tenant?</text>
+  <line x1="102" y1="116" x2="276" y2="116" stroke="#B7C4DD" stroke-width="1.3" marker-end="url(#a3)"/>
+
+  <rect x="26" y="132" width="246" height="46" rx="8" fill="#071733" stroke="#6FD08C" stroke-opacity=".7"/>
+  <text class="m g" x="38" y="151">② new key pair in the TPM</text>
+  <text class="s" x="38" y="169">+ self-signed cert, CN = device ID</text>
+
+  <text class="m" x="190" y="200" text-anchor="middle">③ write userCertificate</text>
+  <line x1="102" y1="208" x2="276" y2="208" stroke="#B7C4DD" stroke-width="1.3" marker-end="url(#a3)"/>
+
+  <text class="m" x="365" y="236" text-anchor="middle">④ next sync cycle</text>
+  <text class="m" x="365" y="250" text-anchor="middle">sees the cert</text>
+  <line x1="282" y1="258" x2="446" y2="258" stroke="#B7C4DD" stroke-width="1.3" marker-end="url(#a3)"/>
+
+  <text class="m" x="535" y="286" text-anchor="middle">⑤ create device object</text>
+  <text class="m a" x="535" y="300" text-anchor="middle">Registered: Pending</text>
+  <line x1="452" y1="308" x2="616" y2="308" stroke="#B7C4DD" stroke-width="1.3" marker-end="url(#a3)"/>
+
+  <line x1="24" y1="332" x2="696" y2="332" stroke="#2a4f86" stroke-width="1"/>
+  <text class="lab" x="24" y="352">PASS 2 · DEVICE'S NEXT JOIN-TASK RUN (SIGN-IN OR SCHEDULE)</text>
+
+  <text class="m" x="360" y="376" text-anchor="middle">⑥ prove I hold the private key · register device + transport keys</text>
+  <line x1="102" y1="384" x2="616" y2="384" stroke="#B7C4DD" stroke-width="1.3" marker-end="url(#a3)"/>
+
+  <text class="m g" x="360" y="414" text-anchor="middle">⑦ registered · dsregcmd: AzureAdJoined : YES</text>
+  <line x1="618" y1="422" x2="104" y2="422" stroke="#6FD08C" stroke-width="1.3" marker-end="url(#a3)"/>
+
+  <text class="s" x="360" y="456" text-anchor="middle">Only after ⑦ can a user on this device be issued a PRT.</text>
+</svg>
+</div>
+<figcaption><b>Two passes, not one.</b> The first run of the join task only gets the cert into AD. Entra doesn't know the device until Entra Connect syncs it, so <span class="k">AzureAdJoined</span> stays <span class="k">NO</span> in between. That gap looks like failure and isn't.</figcaption>
+</figure>
+
+<p>The pieces, in plain terms:</p>
+<ul>
+  <li><strong>The SCP</strong> (Service Connection Point) is a small AD object that tells domain-joined PCs which Entra tenant they belong to. It's configured once per forest.</li>
+  <li><strong>The join task</strong> is <span class="k long">\Microsoft\Windows\Workplace Join\Automatic-Device-Join</span>. It runs at sign-in and on a schedule. You can also run it by hand.</li>
+  <li><strong>The device ID</strong> is the subject of the cert the device creates. It becomes the Entra device object's ID, and it's the ID that Intune, Conditional Access and the sign-in logs all use.</li>
+  <li><strong>The private key never leaves the TPM.</strong> What reaches AD and Entra is only the public half. That's why a device's identity can't be copied to another machine, and also why it can't be "repaired" from the server side once the two halves disagree.</li>
+</ul>
+
+<p>This also explains the prerequisites people hit in the field. The computer's OU has to be <strong>in Entra Connect sync scope</strong>, or step ④ never happens. The device needs <strong>line of sight to a DC</strong> for steps ① and ③, which is why office network or VPN matters.</p>
+
+<h2 class="head"><span class="num">03</span>The PRT: where the device and the user meet</h2>
+<p class="sub">The user's single sign-on token is only issued to a device Entra recognises.</p>
+
+<p>When a user signs in to Windows, the Entra plugin in the Windows sign-in stack sends her credentials to Entra in a request <strong>signed with the device key</strong>. Entra looks up the device object, checks that it exists, is enabled and has a public key matching that signature, and only then issues a <strong>Primary Refresh Token</strong>. The PRT is valid for 14 days, is renewed silently while the device is in use, and is bound to a session key kept in the TPM.</p>
+
+<p>Every M365 app on the machine (Outlook, Teams, Edge, OneDrive) quietly trades the PRT for its own access token. That is what SSO on Windows <em>is</em>. It's also why a broken device identity shows up as "every app is broken at once."</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="At sign-in Windows signs the request with the device key. Entra checks whether the device object exists and the key matches. If yes, a PRT is issued and apps get single sign-on. If no, the result is AADSTS50155, no PRT, and every app prompts or fails.">
+  <defs>
+    <marker id="a4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#B7C4DD" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <text class="lab" x="24" y="28">AT EVERY WINDOWS SIGN-IN</text>
+
+  <rect x="24" y="48" width="140" height="70" rx="10" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h" x="40" y="74">User signs in</text>
+  <text class="s" x="40" y="94">password or</text>
+  <text class="s" x="40" y="109">Windows Hello</text>
+
+  <line x1="166" y1="83" x2="190" y2="83" stroke="#B7C4DD" stroke-width="1.3" marker-end="url(#a4)"/>
+
+  <rect x="192" y="48" width="170" height="70" rx="10" fill="#0C2417" stroke="#6FD08C"/>
+  <text class="h" x="208" y="74">Windows signs</text>
+  <text class="s" x="208" y="94">the token request with</text>
+  <text class="s" x="208" y="109">the TPM device key</text>
+
+  <line x1="364" y1="83" x2="392" y2="83" stroke="#B7C4DD" stroke-width="1.3" marker-end="url(#a4)"/>
+
+  <path d="M470 38 L548 83 L470 128 L392 83 Z" fill="#0A2733" stroke="#5AC8DA"/>
+  <text class="m c" x="470" y="72" text-anchor="middle">Entra: is the</text>
+  <text class="m c" x="470" y="87" text-anchor="middle">device known and</text>
+  <text class="m c" x="470" y="102" text-anchor="middle">does the key match?</text>
+
+  <line x1="550" y1="83" x2="574" y2="83" stroke="#6FD08C" stroke-width="1.3" marker-end="url(#a4)"/>
+  <text class="m g" x="562" y="72" text-anchor="middle">yes</text>
+
+  <rect x="576" y="48" width="120" height="70" rx="10" fill="#0C2417" stroke="#6FD08C"/>
+  <text class="h" x="590" y="74">PRT issued</text>
+  <text class="s" x="590" y="94">14 days, bound</text>
+  <text class="s" x="590" y="109">to the TPM</text>
+
+  <line x1="636" y1="120" x2="636" y2="176" stroke="#6FD08C" stroke-width="1.3" marker-end="url(#a4)"/>
+  <rect x="576" y="178" width="120" height="70" rx="10" fill="#0C2417" stroke="#6FD08C"/>
+  <text class="h" x="590" y="204">SSO works</text>
+  <text class="s" x="590" y="224">Outlook, Teams,</text>
+  <text class="s" x="590" y="239">Edge, OneDrive</text>
+
+  <line x1="470" y1="130" x2="470" y2="176" stroke="#F76F72" stroke-width="1.3" marker-end="url(#a4)"/>
+  <text class="m r" x="480" y="158">no</text>
+  <rect x="372" y="178" width="196" height="70" rx="10" fill="#26131A" stroke="#F76F72"/>
+  <text class="h" x="388" y="204">AADSTS50155</text>
+  <text class="s" x="388" y="224">device authentication failed</text>
+  <text class="s" x="388" y="239">AzureAdPrt : NO</text>
+
+  <line x1="370" y1="213" x2="226" y2="213" stroke="#F76F72" stroke-width="1.3" marker-end="url(#a4)"/>
+  <rect x="24" y="178" width="200" height="70" rx="10" fill="#26131A" stroke="#F76F72" stroke-opacity=".6"/>
+  <text class="h" x="40" y="204">Every app fails</text>
+  <text class="s" x="40" y="224">"register this device" prompt</text>
+  <text class="s" x="40" y="239">that then errors out</text>
+
+  <text class="s" x="24" y="282">The user's password can be perfect. Without a device Entra recognises, there is no PRT.</text>
+</svg>
+</div>
+<figcaption><b>Why the user's symptom was misleading.</b> The prompt to "register the device" is Windows trying to recover from the red branch. It fails for the same reason the sign-in did: the device can't prove an identity Entra knows about.</figcaption>
+</figure>
+
+<h2 class="head"><span class="num">04</span>How the device lands in Intune</h2>
+<p class="sub">Auto-enrollment is triggered by a GPO but performed with the user's token.</p>
+
+<p>For hybrid devices, enrollment is the third link and it depends on the first two:</p>
+<ol>
+  <li>A GPO linked to the computers' OU turns on <em>Enable automatic MDM enrollment using default Azure AD credentials</em> (set to <strong>User Credential</strong>). Some environments also scope it with a security group. All the GPO does is create a scheduled task under <span class="k">\Microsoft\Windows\EnterpriseMgmt</span>.</li>
+  <li>When the user signs in and holds a PRT, that task uses her token to enroll the device. It only works if she's inside the <strong>MDM user scope</strong> on the Microsoft Intune app under <em>Entra → Mobility (MDM and WIP)</em>.</li>
+  <li>Intune creates the device record, <strong>links it to the Entra device ID</strong> and sets her as primary user.</li>
+  <li>Intune writes back to the Entra device object: <span class="k">MDM: Microsoft Intune</span> and, once evaluated, the compliance flag. Conditional Access reads that flag.</li>
+</ol>
+
+<div class="analogy">
+  <p class="tag">Mental model</p>
+  <p>Hybrid join gives the laptop a passport. The PRT is the user's boarding pass, and it's only printed for someone travelling with a valid passport. Intune enrollment is checking in at the gate with that boarding pass. Cancel the passport and nothing after it works, however valid the user's own ID is.</p>
+</div>
+
+<h2 class="head"><span class="num">05</span>The field case: what we saw</h2>
+<p class="sub">A user's laptop, every app failing, and one very informative command.</p>
+
+<p>The ticket was simple: a user couldn't sign in to any M365 app. Windows reported that device authentication had failed and offered to register the device; the registration errored out. Before escalating, someone had already looked in Entra, found the laptop's device object with a <strong>blank join type</strong>, and deleted it as a bad object. The laptop was still listed in Intune, and the open question was whether to Retire, Wipe or Fresh Start it.</p>
+
+<p>The first thing to run on any device-auth problem is <span class="k">dsregcmd /status</span>. Trimmed and anonymised, it said:</p>
+
+<pre class="code"><span class="cm"># Device State</span>
+             AzureAdJoined : <b>YES</b>
+              DomainJoined : YES
+<span class="cm"># Device Details</span>
+                  DeviceId : 1a2b3c4d-0000-4000-8000-00000000c0de
+ DeviceCertificateValidity : [ <span class="cs">2019-03-14</span> -- 2029-03-14 ]
+              TpmProtected : YES
+          DeviceAuthStatus : <span class="cr">FAILED. Device is either disabled or deleted</span>
+<span class="cm"># Tenant Details</span>
+                    MdmUrl : <span class="cm">(blank)</span>
+<span class="cm"># SSO State</span>
+                AzureAdPrt : <span class="cr">NO</span>
+            Attempt Status : 0xc000006d
+         Server Error Code : invalid_grant
+  Server Error Description : <span class="cr">AADSTS50155: Device authentication failed.</span>
+<span class="cm"># Diagnostic Data</span>
+      Last HostName Update : SUCCESS   Client Time : <span class="cs">2022-10-03</span></pre>
+
+<p>Read line by line, that output tells the whole story:</p>
+
+<table class="cmp">
+  <tr><th>Line</th><th>What it means</th></tr>
+  <tr><td><span class="k">AzureAdJoined : YES</span></td><td>The laptop <em>believes</em> it's hybrid joined. This is only its local opinion.</td></tr>
+  <tr><td><span class="k">DeviceAuthStatus : FAILED</span></td><td>Entra rejects that belief. The device object it's claiming is gone or disabled.</td></tr>
+  <tr><td>Cert valid from <span class="k">2019</span></td><td>The identity dates from the original join, years ago.</td></tr>
+  <tr><td>Last device write <span class="k">2022</span></td><td>The last time this device successfully updated its Entra object. It had been quietly broken for a long time before anyone noticed.</td></tr>
+  <tr><td><span class="k">AADSTS50155</span></td><td>No PRT because of device authentication, not the user's password.</td></tr>
+  <tr><td><span class="k">MdmUrl</span> blank</td><td>No working Intune link from the device's point of view.</td></tr>
+</table>
+
+<p>So the diagnosis: <strong>the laptop and Entra disagreed about who the laptop was.</strong> The blank join type in Entra was the symptom of an object that had already drifted out of sync. Deleting it didn't cause the problem, but it did make it final, because the laptop was now presenting a device ID with no object behind it at all.</p>
+
+<h2 class="head"><span class="num">06</span>Why not wipe, retire or Fresh Start?</h2>
+<p class="sub">Every one of those acts on the wrong record.</p>
+
+<p>The Intune record wasn't the problem. It was a <em>downstream casualty</em>. The broken thing was the join state on the laptop, and none of the Intune actions touch that without also destroying something the user needs.</p>
+
+<table class="cmp">
+  <tr><th>Action</th><th>What it does</th><th>Here?</th></tr>
+  <tr><td><strong>Wipe</strong></td><td>Factory reset. User data gone.</td><td><span class="rk rk-high">No</span></td></tr>
+  <tr><td><strong>Fresh Start</strong></td><td>Reinstalls Windows and strips apps. Not meant for hybrid-joined devices.</td><td><span class="rk rk-high">No</span></td></tr>
+  <tr><td><strong>Retire</strong></td><td>Removes Intune profiles, certs and apps. Keeps user data. Doesn't touch the join.</td><td><span class="rk rk-care">Doesn't fix it</span></td></tr>
+  <tr><td><strong>Reset the join</strong></td><td>Drops the stale identity locally and lets the device re-register. No user data touched.</td><td><span class="rk rk-routine">Yes</span></td></tr>
+</table>
+
+<h2 class="head"><span class="num">07</span>The fix, step by step</h2>
+<p class="sub">Clear the stale identity on both sides, re-run the join, and let the chain rebuild itself.</p>
+
+<p><strong>1. Leave, on the laptop</strong> (elevated):</p>
+<pre class="code">dsregcmd /leave
+dsregcmd /status      <span class="cm"># expect AzureAdJoined : NO</span></pre>
+
+<p><strong>2. Clear the old cert from AD</strong> (on a DC or anywhere with RSAT; the AD module won't be on the laptop). After the leave, the laptop no longer has the private key that matches this cert. Leaving it on the object risks Entra Connect syncing a dead identity back up.</p>
+<pre class="code">Set-ADComputer <span class="cs">WS-EXAMPLE01</span> -Clear userCertificate</pre>
+
+<p><strong>3. Reboot, sign in, and run the join task</strong> (elevated on the laptop, on the corporate network or VPN):</p>
+<pre class="code">schtasks /run /tn "\Microsoft\Windows\Workplace Join\Automatic-Device-Join"</pre>
+
+<p>Then confirm the new cert reached AD. It prints as a long column of byte values, which is fine; you're only checking that something is there.</p>
+<pre class="code">Get-ADComputer <span class="cs">WS-EXAMPLE01</span> -Properties userCertificate |
+  Select-Object -ExpandProperty userCertificate</pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>AzureAdJoined : NO here is expected</h3><p>This is the gap between pass 1 and pass 2 in the sequence diagram. The cert is in AD, but Entra hasn't heard about it yet. Don't start troubleshooting; sync first.</p></div>
+</div>
+
+<p><strong>4. Sync</strong> (on the Entra Connect server):</p>
+<pre class="code">Start-ADSyncSyncCycle -PolicyType Delta</pre>
+<p>The device reappears in Entra as <strong>Microsoft Entra hybrid joined</strong>, with Registered showing <em>Pending</em>.</p>
+
+<p><strong>5. Run the join task again</strong> to complete pass 2, then check:</p>
+<pre class="code">dsregcmd /status | findstr /i "AzureAdJoined DeviceAuthStatus AzureAdPrt"
+             AzureAdJoined : <span class="cv">YES</span>
+          DeviceAuthStatus : <span class="cv">SUCCESS</span>
+                AzureAdPrt : NO      <span class="cm"># run as the local admin, so NO is correct</span></pre>
+
+<p><strong>6. Have the user sign out fully and back in</strong>. Lock and unlock isn't enough. Then check again <em>in her session</em>.</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 454" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="State after each step of the fix: joined, device auth, PRT and Intune. Before the fix, joined is a false yes, device auth failed, no PRT, Intune orphaned. After the final step all four are healthy.">
+  <text class="lab" x="24" y="30">STATE AFTER EACH STEP</text>
+  <g class="lab"><text x="425" y="56" text-anchor="middle">JOINED</text><text x="505" y="56" text-anchor="middle">DEV AUTH</text><text x="585" y="56" text-anchor="middle">PRT</text><text x="665" y="56" text-anchor="middle">INTUNE</text></g>
+  <line x1="24" y1="66" x2="696" y2="66" stroke="#1E3E70"/>
+
+  <!-- row template: name y, note y+16, pills centered y-5 -->
+  <g>
+    <text class="h" x="24" y="90">0 · Before</text><text class="s" x="24" y="106">AADSTS50155 on every sign-in</text>
+    <rect x="390" y="80" width="70" height="22" rx="5" fill="#241F0C" stroke="#F2D45C" stroke-opacity=".6"/><text class="pill a" x="425" y="95" text-anchor="middle">YES?</text>
+    <rect x="470" y="80" width="70" height="22" rx="5" fill="#26131A" stroke="#F76F72" stroke-opacity=".6"/><text class="pill r" x="505" y="95" text-anchor="middle">FAILED</text>
+    <rect x="550" y="80" width="70" height="22" rx="5" fill="#26131A" stroke="#F76F72" stroke-opacity=".6"/><text class="pill r" x="585" y="95" text-anchor="middle">NO</text>
+    <rect x="630" y="80" width="70" height="22" rx="5" fill="#241F0C" stroke="#F2D45C" stroke-opacity=".6"/><text class="pill a" x="665" y="95" text-anchor="middle">ORPHAN</text>
+  </g>
+  <g>
+    <text class="h" x="24" y="134">1 · dsregcmd /leave</text><text class="s" x="24" y="150">drops the stale local identity</text>
+    <rect x="390" y="124" width="70" height="22" rx="5" fill="#0C244C" stroke="#4C6193"/><text class="pill x" x="425" y="139" text-anchor="middle">NO</text>
+    <rect x="470" y="124" width="70" height="22" rx="5" fill="#0C244C" stroke="#4C6193"/><text class="pill x" x="505" y="139" text-anchor="middle">—</text>
+    <rect x="550" y="124" width="70" height="22" rx="5" fill="#0C244C" stroke="#4C6193"/><text class="pill x" x="585" y="139" text-anchor="middle">NO</text>
+    <rect x="630" y="124" width="70" height="22" rx="5" fill="#241F0C" stroke="#F2D45C" stroke-opacity=".6"/><text class="pill a" x="665" y="139" text-anchor="middle">ORPHAN</text>
+  </g>
+  <g>
+    <text class="h" x="24" y="178">2 · Clear userCertificate</text><text class="s" x="24" y="194">old cert can't sync back up</text>
+    <rect x="390" y="168" width="70" height="22" rx="5" fill="#0C244C" stroke="#4C6193"/><text class="pill x" x="425" y="183" text-anchor="middle">NO</text>
+    <rect x="470" y="168" width="70" height="22" rx="5" fill="#0C244C" stroke="#4C6193"/><text class="pill x" x="505" y="183" text-anchor="middle">—</text>
+    <rect x="550" y="168" width="70" height="22" rx="5" fill="#0C244C" stroke="#4C6193"/><text class="pill x" x="585" y="183" text-anchor="middle">NO</text>
+    <rect x="630" y="168" width="70" height="22" rx="5" fill="#241F0C" stroke="#F2D45C" stroke-opacity=".6"/><text class="pill a" x="665" y="183" text-anchor="middle">ORPHAN</text>
+  </g>
+  <g>
+    <text class="h" x="24" y="222">3 · Reboot + join task</text><text class="s" x="24" y="238">new cert written to AD (pass 1)</text>
+    <rect x="390" y="212" width="70" height="22" rx="5" fill="#0C244C" stroke="#4C6193"/><text class="pill x" x="425" y="227" text-anchor="middle">NO</text>
+    <rect x="470" y="212" width="70" height="22" rx="5" fill="#0C244C" stroke="#4C6193"/><text class="pill x" x="505" y="227" text-anchor="middle">—</text>
+    <rect x="550" y="212" width="70" height="22" rx="5" fill="#0C244C" stroke="#4C6193"/><text class="pill x" x="585" y="227" text-anchor="middle">NO</text>
+    <rect x="630" y="212" width="70" height="22" rx="5" fill="#241F0C" stroke="#F2D45C" stroke-opacity=".6"/><text class="pill a" x="665" y="227" text-anchor="middle">ORPHAN</text>
+  </g>
+  <g>
+    <text class="h" x="24" y="266">4 · Entra Connect sync</text><text class="s" x="24" y="282">object back in Entra, Registered: Pending</text>
+    <rect x="390" y="256" width="70" height="22" rx="5" fill="#241F0C" stroke="#F2D45C" stroke-opacity=".6"/><text class="pill a" x="425" y="271" text-anchor="middle">PENDING</text>
+    <rect x="470" y="256" width="70" height="22" rx="5" fill="#0C244C" stroke="#4C6193"/><text class="pill x" x="505" y="271" text-anchor="middle">—</text>
+    <rect x="550" y="256" width="70" height="22" rx="5" fill="#0C244C" stroke="#4C6193"/><text class="pill x" x="585" y="271" text-anchor="middle">NO</text>
+    <rect x="630" y="256" width="70" height="22" rx="5" fill="#241F0C" stroke="#F2D45C" stroke-opacity=".6"/><text class="pill a" x="665" y="271" text-anchor="middle">ORPHAN</text>
+  </g>
+  <g>
+    <text class="h" x="24" y="310">5 · Join task again</text><text class="s" x="24" y="326">registration completes (pass 2)</text>
+    <rect x="390" y="300" width="70" height="22" rx="5" fill="#0C2417" stroke="#6FD08C" stroke-opacity=".7"/><text class="pill g" x="425" y="315" text-anchor="middle">YES</text>
+    <rect x="470" y="300" width="70" height="22" rx="5" fill="#0C2417" stroke="#6FD08C" stroke-opacity=".7"/><text class="pill g" x="505" y="315" text-anchor="middle">SUCCESS</text>
+    <rect x="550" y="300" width="70" height="22" rx="5" fill="#0C244C" stroke="#4C6193"/><text class="pill x" x="585" y="315" text-anchor="middle">NO*</text>
+    <rect x="630" y="300" width="70" height="22" rx="5" fill="#241F0C" stroke="#F2D45C" stroke-opacity=".6"/><text class="pill a" x="665" y="315" text-anchor="middle">ORPHAN</text>
+  </g>
+  <g>
+    <text class="h" x="24" y="354">6 · User signs out and in</text><text class="s" x="24" y="370">PRT issued in her session</text>
+    <rect x="390" y="344" width="70" height="22" rx="5" fill="#0C2417" stroke="#6FD08C" stroke-opacity=".7"/><text class="pill g" x="425" y="359" text-anchor="middle">YES</text>
+    <rect x="470" y="344" width="70" height="22" rx="5" fill="#0C2417" stroke="#6FD08C" stroke-opacity=".7"/><text class="pill g" x="505" y="359" text-anchor="middle">SUCCESS</text>
+    <rect x="550" y="344" width="70" height="22" rx="5" fill="#0C2417" stroke="#6FD08C" stroke-opacity=".7"/><text class="pill g" x="585" y="359" text-anchor="middle">YES</text>
+    <rect x="630" y="344" width="70" height="22" rx="5" fill="#241F0C" stroke="#F2D45C" stroke-opacity=".6"/><text class="pill a" x="665" y="359" text-anchor="middle">ORPHAN</text>
+  </g>
+  <g>
+    <text class="h" x="24" y="398">7 · GPO auto-enroll (+3 min)</text><text class="s" x="24" y="414">new Intune record, MDM written back</text>
+    <rect x="390" y="388" width="70" height="22" rx="5" fill="#0C2417" stroke="#6FD08C" stroke-opacity=".7"/><text class="pill g" x="425" y="403" text-anchor="middle">YES</text>
+    <rect x="470" y="388" width="70" height="22" rx="5" fill="#0C2417" stroke="#6FD08C" stroke-opacity=".7"/><text class="pill g" x="505" y="403" text-anchor="middle">SUCCESS</text>
+    <rect x="550" y="388" width="70" height="22" rx="5" fill="#0C2417" stroke="#6FD08C" stroke-opacity=".7"/><text class="pill g" x="585" y="403" text-anchor="middle">YES</text>
+    <rect x="630" y="388" width="70" height="22" rx="5" fill="#0C2417" stroke="#6FD08C" stroke-opacity=".7"/><text class="pill g" x="665" y="403" text-anchor="middle">ENROLLED</text>
+  </g>
+  <text class="s" x="24" y="440">* Checked from the local admin's elevated shell. A local account never gets a PRT; only the user's session counts.</text>
+</svg>
+</div>
+<figcaption><b>Watch the chain rebuild in order.</b> Join comes back, then device auth, then the PRT, and only then Intune. Each column turns green only after the one to its left. Nothing on the Intune side was touched by hand.</figcaption>
+</figure>
+
+<h2 class="head"><span class="num">08</span>Proving it was fixed</h2>
+<p class="sub">Validate each link, in the user's session, not the admin's.</p>
+
+<pre class="code">PS C:\Users\user&gt; dsregcmd /status | Select-String "SSO State" -Context 0,10
+                AzureAdPrt : <span class="cv">YES</span>
+      AzureAdPrtUpdateTime : 2026-01-12 18:02 UTC
+      AzureAdPrtExpiryTime : 2026-01-26 18:02 UTC     <span class="cm"># 14 days, renews on its own</span>
+    Executing Account Name : CONTOSO\user
+               KeySignTest : <span class="cv">PASSED</span></pre>
+
+<ul>
+  <li><strong>Link 1 (join):</strong> Entra shows the device as <em>Microsoft Entra hybrid joined</em>, and Registered now has a date instead of <em>Pending</em>.</li>
+  <li><strong>Link 2 (PRT):</strong> <span class="k">AzureAdPrt : YES</span> in the user's session. Outlook, Teams and Edge all signed in silently.</li>
+  <li><strong>Link 3 (Intune):</strong> a new enrollment appeared <strong>three minutes</strong> after the PRT was issued, with the user as primary user. That timing is the GPO task firing as soon as it had a token to use. The Entra object flipped to <span class="k">MDM: Microsoft Intune</span>.</li>
+  <li><strong>Link 4 (compliance):</strong> a brand-new record shows <em>Not evaluated</em> and OS <span class="k">0.0.0.0</span> until its first full check-in. Hit Sync and give it half an hour or so; it isn't broken.</li>
+</ul>
+
+<p>Two things went away with the deleted Entra object and needed putting back:</p>
+<pre class="code"><span class="cm"># BitLocker: re-escrow the recovery key to the new object</span>
+$kp = (Get-BitLockerVolume C:).KeyProtector | ? KeyProtectorType -eq RecoveryPassword
+BackupToAAD-BitLockerKeyProtector -MountPoint C: -KeyProtectorId $kp.KeyProtectorId
+
+<span class="cm"># LAPS: repopulates once Intune policy lands; nudge it with</span>
+Invoke-LapsPolicyProcessing</pre>
+
+<p>One more thing: if LAPS manages the local admin account you've been using all afternoon, its password rotates as soon as policy applies. Retrieve the new one from Entra before you need it.</p>
+
+<h2 class="head"><span class="num">09</span>"Why are there two devices in Entra?"</h2>
+<p class="sub">The question everyone asks at the end, and the one object you must not clean up.</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="One laptop appears twice in Entra: once under its hostname as the real hybrid-joined device, and once under its serial number as an Autopilot placeholder.">
+  <defs>
+    <marker id="a5" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#7C8DB3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <rect x="24" y="66" width="170" height="88" rx="12" fill="#0C2417" stroke="#6FD08C"/>
+  <text class="h" x="44" y="100">One laptop</text>
+  <text class="s" x="44" y="122">one TPM, one serial,</text>
+  <text class="s" x="44" y="138">one Windows install</text>
+
+  <path d="M196 96 C 260 96, 260 58, 330 58" fill="none" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a5)"/>
+  <text class="m" x="262" y="50" text-anchor="middle">hybrid join</text>
+  <path d="M196 124 C 260 124, 260 162, 330 162" fill="none" stroke="#7C8DB3" stroke-width="1.3" stroke-dasharray="4 4" marker-end="url(#a5)"/>
+  <text class="m x" x="262" y="186" text-anchor="middle">hash imported</text>
+
+  <rect x="334" y="20" width="362" height="80" rx="12" fill="#0A2733" stroke="#5AC8DA"/>
+  <text class="h" x="352" y="46">WS-EXAMPLE01 <tspan class="m c">· hybrid joined</tspan></text>
+  <text class="s" x="352" y="68">The real device: device auth, PRT, compliance,</text>
+  <text class="s" x="352" y="85">BitLocker keys, LAPS. This is what we fixed.</text>
+
+  <rect x="334" y="120" width="362" height="80" rx="12" fill="#0C244C" stroke="#7C8DB3" stroke-dasharray="4 4"/>
+  <text class="h" x="352" y="146">5CG0XXXXXX <tspan class="m x">· serial-named</tspan></text>
+  <text class="s" x="352" y="168">Autopilot placeholder. Never signs in, so OS is</text>
+  <text class="s" x="352" y="185">"Unknown". Leave it alone.</text>
+</svg>
+</div>
+<figcaption><b>Not a duplicate.</b> When a hardware hash is imported into Windows Autopilot, Entra creates an object named after the serial number. It holds the device's Autopilot registration for future resets and has nothing to do with sign-in.</figcaption>
+</figure>
+
+<p>In this case the Autopilot page showed the laptop with <em>Profile status: Not assigned</em> and no group tag, which means it was registered in some earlier bulk import but Autopilot isn't actively doing anything for it. Deleting it is harmless to today's problem, but it's a fleet decision (does this organisation use Autopilot for reimages or not?), not something to tidy up in the middle of a ticket.</p>
+
+<h2 class="head"><span class="num">10</span>The confusions, laid out</h2>
+<p class="sub">Every one of these came up while this ticket was being worked.</p>
+
+<div class="mr">
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">A device object with a blank join type is junk and can be deleted.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">It's usually a <strong>live device whose registration drifted</strong>. Check <span class="k">dsregcmd /status</span> on the machine first. Deleting it makes device-auth failure certain.</p></div></div></div>
+  </div>
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">Device auth is broken, so the laptop needs a wipe or Fresh Start.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">The fault is in the <strong>join state</strong>, not the OS or the data. <span class="k">dsregcmd /leave</span> and a re-join fix it without touching a file.</p></div></div></div>
+  </div>
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim"><span class="k">AzureAdJoined : NO</span> right after running the join task means the join failed.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">In a managed tenant it's the <strong>gap between pass 1 and pass 2</strong>. Check the cert landed in AD, run a sync, run the task again.</p></div></div></div>
+  </div>
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim"><span class="k">AzureAdPrt : NO</span> in my admin shell means the user still has no PRT.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">The PRT is <strong>per user</strong>. A local admin never gets one. Check <span class="k">Executing Account Name</span> and run it in the user's own session.</p></div></div></div>
+  </div>
+</div>
+
+<div class="tldr">
+<ul>
+  <li><b>Symptom:</b> every M365 app fails; "device authentication failed"; the register prompt errors out.</li>
+  <li><b>Root cause:</b> the laptop's hybrid join identity no longer matched any Entra device object (<span class="k">AADSTS50155</span>), so no PRT could be issued.</li>
+  <li><b>Fix:</b> <span class="k">dsregcmd /leave</span> → clear <span class="k">userCertificate</span> in AD → join task → Entra Connect sync → join task → user signs out and in.</li>
+  <li><b>Validated:</b> <span class="k">DeviceAuthStatus : SUCCESS</span>, <span class="k">AzureAdPrt : YES</span> in the user session, Intune re-enrolled by itself, BitLocker key re-escrowed.</li>
+  <li><b>Not touched:</b> user data, the OS, the Autopilot object.</li>
+</ul>
+</div>
+
+<div class="takeaway">
+  <p class="tag">The one-line model</p>
+  <p>Device identity comes first, the user's PRT is issued on top of it, and Intune is built on the PRT. When every app fails at once, start at <span class="k">dsregcmd /status</span> and fix the first broken link. Everything downstream rebuilds itself.</p>
+</div>
+
+<div class="sources">
+<h2>Sources &amp; further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/devices/troubleshoot-device-dsregcmd">Troubleshoot devices by using the dsregcmd command</a><span>what every field in the output means</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/devices/troubleshoot-hybrid-join-windows-current">Troubleshoot Microsoft Entra hybrid joined devices</a><span>the registration phases and their errors</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/devices/concept-primary-refresh-token">Understand Primary Refresh Token (PRT)</a><span>how the PRT is issued, renewed and protected</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/entra/identity/devices/how-to-hybrid-join">Configure Microsoft Entra hybrid join</a><span>SCP, sync scope and prerequisites</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/mem/intune/enrollment/windows-enroll">Set up automatic enrollment for Windows</a><span>MDM user scope and the enrollment paths</span></li>
+</ul>
+</div>
+
+<p class="disclaimer">Anonymised from real support work. Device names, serial numbers, IDs, tenant details and account names have been changed.</p>
+
+</div>
+</article>
+
+<div class="connect">
+<div class="row"><span class="lab">Filed under</span><a class="lk" href="/endpoint/hardening.html"><div class="t">Endpoint Security › Hardening &amp; compliance</div><div class="d">Browse this part of the knowledge base.</div></a></div>
+<div class="row"><span class="lab">Related</span><div class="grid2"><a class="lk" href="/posts/intune-hybrid-enrollment.html"><div class="t">Hybrid Intune auto-enrollment, end to end</div><div class="d">Endpoint Security · Hardening &amp; compliance</div></a><a class="lk" href="/posts/token-protection.html"><div class="t">Why a stolen token dies on the wrong laptop</div><div class="d">Identity Security · Token &amp; session security</div></a></div></div>
+</div>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Ground Truth</span>
+  <span><a href="/">Home</a> · <a href="/endpoint/">Endpoint</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>
