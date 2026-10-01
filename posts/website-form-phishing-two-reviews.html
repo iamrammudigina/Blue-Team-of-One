@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cleared as safe: a website-form phish that fooled two reviews — Ground Truth</title>
+<meta name="description" content="A phishing submission through a website quote form was cleared as safe and caught a week later. Two reviews looked at it and both missed it, for opposite reasons. Why relayed form mail defeats envelope checks, the lookalike-domain tell, and the anti-spam policy scoping the cleanup exposed.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;680;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=32">
+<style>
+  /* scoped diagram styling — figures aren't styled globally */
+  figure.diagram{margin:30px 0; padding:0}
+  figure.diagram .scroll{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  figure.diagram svg{display:block; width:100%; min-width:640px; height:auto;
+    background:#0A1E42; border:1px solid #1E3E70; border-radius:10px}
+  figure.diagram figcaption{margin-top:10px; font-family:var(--mono); font-size:12.5px; color:var(--ink-3); line-height:1.5}
+  figure.diagram figcaption b{color:var(--ink-2)}
+  .dg .lab{font-family:var(--mono); font-size:10.5px; letter-spacing:.08em; fill:#7C8DB3}
+  .dg .h{font-family:var(--mono); font-size:13px; font-weight:700; fill:#EAEEF6}
+  .dg .b{font-family:var(--sans); font-size:12.5px; fill:#B7C4DD}
+  .dg .s{font-family:var(--sans); font-size:11.5px; fill:#7C8DB3}
+  .dg .m{font-family:var(--mono); font-size:11px; fill:#B7C4DD}
+  .dg .pill{font-family:var(--mono); font-size:10.5px; font-weight:700}
+  .dg .g{fill:#6FD08C} .dg .a{fill:#F2D45C} .dg .c{fill:#5AC8DA} .dg .v{fill:#b79bff} .dg .r{fill:#F76F72} .dg .x{fill:#7C8DB3}
+  pre .cr{color:#f0868a}
+  .tldr{border:1px solid var(--line); border-radius:8px; background:var(--bg-2); padding:6px 18px; margin:26px 0}
+  .tldr li{margin:10px 0; color:var(--ink-2)}
+  .tldr b{color:var(--ink)}
+  @media (max-width:640px){ .mr{grid-template-columns:1fr}
+    .cmp{font-size:12.5px} .cmp th,.cmp td{padding:8px 9px; overflow-wrap:anywhere}
+    .k.long{white-space:normal; overflow-wrap:anywhere} }
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Ground <b>Truth</b></span>
+      <span class="tag">field notes · a blue team of one</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/" aria-current="page">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/email/">Email Security</a><span class="sep">›</span><a href="/email/inbound.html">Inbound security</a></p>
+    <p class="eyebrow"><span class="dot"></span>Deep dive + field case · phishing triage</p>
+    <h1>Cleared as safe: a website-form phish that <em>fooled two reviews</em></h1>
+    <p class="lede">A phishing submission came in through a client's website quote form, was cleared as a legitimate sales inquiry, and the error stood for a week until the client caught it. Two reviews had looked at it — an automated assistant and a human analyst — and both missed the threat, for opposite reasons. The envelope was perfect. The attack was entirely in what the visitor typed.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>October 1, 2026</span>
+      <span>~14 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>This one is worth writing up because it is a <em>miss</em>, not a win — and because the reason it was missed is structural, not careless. The mail was fully authenticated. It carried no link to click and no file to open. It passed every reputation check a mail filter runs. And it was still phishing. The entire signal lived in one character of a domain the visitor typed into a form field, which is exactly the layer neither review was looking at.</p>
+
+<p>If you only take one idea from this: <strong>for relayed form mail, the envelope is trusted and identical every time. The verdict depends entirely on what the visitor typed into the form.</strong> Everything below is why that is true, how both reviews went wrong, and the mail-filtering architecture the cleanup exposed underneath.</p>
+
+<h2 class="head"><span class="num">01</span>How website-form mail actually arrives</h2>
+<p class="sub">The visitor never sends you mail. A relay does, under your own display name, from the vendor's domain.</p>
+
+<p>A company's "Request a Quote" and "Contact Us" forms almost never send mail from the person filling them in. A web vendor's backend collects the submission and relays a notification to the company — sent <strong>from the vendor's own domain</strong>, under the <strong>company's display name</strong>, authenticated by the vendor. So the notification looks, at first glance, exactly like display-name spoofing: "Acme Corp" sent from an address that has nothing to do with acme.com. It isn't spoofing. It's how every legitimate form notification arrives.</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A visitor types values into a website form. The web vendor's backend relays a notification from the vendor's domain under the client's display name, authenticated with the vendor's DKIM, into the client mailbox. Only the field values are attacker-controlled; everything above the mailbox is fixed and trusted.">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#7C8DB3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <text class="lab" x="24" y="30">THE FORM RELAY · ONLY ONE BOX IS ATTACKER-CONTROLLED</text>
+
+  <rect x="24" y="52" width="150" height="104" rx="10" fill="#26131A" stroke="#F76F72" stroke-width="1.3"/>
+  <text class="h" x="40" y="78">Visitor</text>
+  <text class="b" x="40" y="100">types field values:</text>
+  <text class="m r" x="40" y="120">name · company</text>
+  <text class="m r" x="40" y="136">email · phone · text</text>
+
+  <line x1="174" y1="104" x2="194" y2="104" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+
+  <rect x="196" y="52" width="160" height="104" rx="10" fill="#0A2733" stroke="#5AC8DA" stroke-width="1.2"/>
+  <text class="h" x="212" y="78">Web vendor</text>
+  <text class="b" x="212" y="100">backend relays the</text>
+  <text class="b" x="212" y="116">submission as mail</text>
+  <text class="m c" x="212" y="136">from vendor domain</text>
+
+  <line x1="356" y1="104" x2="376" y2="104" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+
+  <rect x="378" y="52" width="170" height="104" rx="10" fill="#0C2417" stroke="#6FD08C" stroke-width="1.2"/>
+  <text class="h" x="394" y="78">Authenticated send</text>
+  <text class="s" x="394" y="100">client display name,</text>
+  <text class="s" x="394" y="116">vendor DKIM/SPF pass</text>
+  <text class="m g" x="394" y="136">DMARC: pass</text>
+
+  <line x1="548" y1="104" x2="568" y2="104" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+
+  <rect x="570" y="52" width="126" height="104" rx="10" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h" x="586" y="78">Mailbox</text>
+  <text class="s" x="586" y="100">lands in Inbox,</text>
+  <text class="s" x="586" y="116">clean verdict</text>
+  <text class="m" x="586" y="136">SCL 1</text>
+
+  <path d="M30 172 v8 h138 v-8" fill="none" stroke="#F76F72" stroke-width="1.2"/>
+  <text class="m r" x="30" y="200">attacker controls only this</text>
+  <path d="M202 172 v8 h488 v-8" fill="none" stroke="#6FD08C" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <text class="s" x="446" y="200" text-anchor="middle">fixed, authenticated, identical for every submission — genuine or malicious</text>
+</svg>
+</div>
+<figcaption><b>The whole problem in one picture.</b> A malicious submission and a genuine quote request are indistinguishable by envelope, because the envelope belongs to the vendor, not the visitor. Reputation and authentication checks all pass. The only attacker-controlled bytes are the field values.</figcaption>
+</figure>
+
+<h2 class="head"><span class="num">02</span>The submission</h2>
+<p class="sub">A polite quote request from a real-sounding vendor — with one character wrong.</p>
+
+<p>The form notification carried the fields exactly as the visitor typed them. Read in isolation it is a bland sales inquiry. Read against the <em>real</em> company it claims to be, every line is a tell. (All values below are fictionalised; the pattern is what matters.)</p>
+
+<table class="cmp">
+  <tr><th>Form field</th><th>Submitted value</th><th>The real vendor</th></tr>
+  <tr><td>Name</td><td>a plausible buyer name</td><td>—</td></tr>
+  <tr><td>Company</td><td>Keystone Bolt &amp; Supply Inc.</td><td>A real company — same name</td></tr>
+  <tr><td>Email</td><td><span class="k long">brian.todd@keystonebolts.com</span></td><td>Real domain is <span class="k long">keystonebolt.com</span> — no trailing <strong>s</strong></td></tr>
+  <tr><td>Phone</td><td>a toll-free number</td><td>Does not match the vendor's published number</td></tr>
+  <tr><td>Website (in signature)</td><td><span class="k long">www.keystonebolt.com</span></td><td>The <em>real</em> site — pasted in to borrow credibility</td></tr>
+  <tr><td>Message</td><td>a vague "business opportunity," asking for the right email address to send a document to</td><td>—</td></tr>
+</table>
+
+<p>There are no part numbers, no quantities, no drawings — nothing a real RFQ contains. The only actual request is <strong>an email address to send something to.</strong> That is the entire payload: this is a first-stage pretext whose job is to get a human to reply, at which point the follow-up carries the malicious document or the credential-harvesting link. The signature even linked the <em>real</em> vendor's website while the From address used a lookalike one character off. That mismatch — real site, fake sender domain — is the signature move of vendor-impersonation phishing.</p>
+
+<h2 class="head"><span class="num">02b</span>Two reviews, two misses</h2>
+<p class="sub">One judged the envelope and got it wrong. One judged the body and missed what the fields contained.</p>
+
+<p>The submission was reviewed twice before it was cleared, and the two reviews reached <em>opposite</em> wrong conclusions. An email has layers; each review looked at a different one, and the real threat sat in a layer neither inspected.</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="An email has three layers: envelope, body text, and the submitted field values. The automated review judged the envelope and called it bulk spam, wrong. The analyst judged the body and called it a legitimate inquiry, wrong. The lookalike domain in the field values was checked by neither.">
+  <text class="lab" x="24" y="30">THREE LAYERS · THE THREAT WAS IN THE ONE NEITHER CHECKED</text>
+
+  <rect x="24" y="48" width="432" height="58" rx="10" fill="#241F0C" stroke="#F2D45C" stroke-width="1.1"/>
+  <text class="h" x="40" y="72">① Envelope</text>
+  <text class="s" x="40" y="92">client display name · vendor domain · DKIM/SPF/DMARC pass · tracking link</text>
+
+  <rect x="480" y="48" width="216" height="58" rx="10" fill="#26131A" stroke="#F76F72" stroke-width="1.2"/>
+  <text class="pill r" x="496" y="70">AUTOMATED REVIEW</text>
+  <text class="s" x="496" y="90">"bulk platform → spam"</text>
+  <line x1="456" y1="77" x2="476" y2="77" stroke="#F76F72" stroke-width="1.3"/>
+
+  <rect x="24" y="118" width="432" height="58" rx="10" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h" x="40" y="142">② Body text</text>
+  <text class="s" x="40" y="162">polite sales message · no link · no attachment · no payment ask</text>
+
+  <rect x="480" y="118" width="216" height="58" rx="10" fill="#26131A" stroke="#F76F72" stroke-width="1.2"/>
+  <text class="pill r" x="496" y="140">ANALYST REVIEW</text>
+  <text class="s" x="496" y="160">"no payload → legitimate"</text>
+  <line x1="456" y1="147" x2="476" y2="147" stroke="#F76F72" stroke-width="1.3"/>
+
+  <rect x="24" y="188" width="672" height="58" rx="10" fill="#0C2417" stroke="#6FD08C" stroke-width="1.4"/>
+  <text class="h" x="40" y="212">③ Submitted field values</text>
+  <text class="b" x="40" y="232">lookalike sender domain · mismatched phone · vague ask — <tspan class="g">checked by neither review</tspan></text>
+</svg>
+</div>
+<figcaption><b>Both reviews were competent and both were wrong.</b> The automated pass judged the envelope as a bulk-outreach platform and said "spam, delete." The analyst judged the body as a clean sales note and said "legitimate, route it." The decisive evidence was one layer down, in the field values, and nobody compared them to the real vendor.</figcaption>
+</figure>
+
+<div class="mr">
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">Display name from an unrelated domain = spoofing, treat as spam.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">That is <strong>exactly how a legitimate form relay looks</strong>. When the vendor's DKIM passes, it is not spoofing. Acting on "spam" would have blocked the client's own lead intake.</p></div></div></div>
+  </div>
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">No link and no attachment means there's no phishing here.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">The absence of a payload is <strong>normal for a first-stage pretext</strong>. The attack depends on the reply, not on a click. The harm arrives in the follow-up.</p></div></div></div>
+  </div>
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">Two automated notes disagree, so pick the one that sounds right.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">Contradictory triage notes are a signal to <strong>reconcile</strong>, not to choose. The disagreement itself meant nobody had actually identified what the message was.</p></div></div></div>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">03</span>Why the envelope could never help</h2>
+<p class="sub">Every sample of this relay's mail authenticates perfectly and filters as clean. That is the point.</p>
+
+<p>Pulling raw headers from several of the vendor's real notifications made the trap explicit: all of them pass SPF, DKIM, DMARC and composite authentication, and all of them are scored as clean, non-spam mail delivered to the Inbox. There is no envelope signal that separates a malicious submission from a genuine one, because the envelope is the vendor's and the vendor is legitimate.</p>
+
+<table class="cmp">
+  <tr><th>Header signal</th><th>What every sample showed</th></tr>
+  <tr><td>SPF / DKIM / DMARC</td><td>All pass, aligned to the <strong>vendor</strong>'s domain</td></tr>
+  <tr><td>Composite auth (CompAuth)</td><td>pass, reason 100</td></tr>
+  <tr><td>Sending IPs</td><td>Several different IPs across two countries — an IP allow-list would break; the DKIM domain is the only stable identifier</td></tr>
+  <tr><td>Spam verdict</td><td><span class="k">SFV:NSPM</span> — went through full filtering and was judged <em>not</em> spam</td></tr>
+  <tr><td>Attachments</td><td>Some form types pass uploaded files through, so malware and Safe Attachments scanning must keep applying</td></tr>
+</table>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>Read the verdict, not just the pass/fail</h3><p><span class="k">SFV:NSPM</span> means "filtered normally, judged clean." If an allow-list in the applied policy had bypassed filtering, you'd see <span class="k">SFV:SKA</span> instead. Spotting <span class="k">NSPM</span> where you expected <span class="k">SKA</span> was the first clue that the allow entry everyone assumed was protecting this mail <em>wasn't being applied at all</em> — which opened up the whole policy-scoping problem below.</p></div>
+</div>
+
+<h2 class="head"><span class="num">04</span>The investigation, and the trap underneath</h2>
+<p class="sub">Nothing was blocking the vendor's mail. But the reason that was true turned out to be luck, not design.</p>
+
+<p>The first job was to disprove the automated review's claim that the vendor's mail was being treated as spam. A handful of read-only checks in Exchange Online PowerShell settled it — nothing was quarantining or blocking the relay — but check #7 is where it got interesting.</p>
+
+<pre class="code"><span class="cm"># Is the vendor's mail being quarantined? (30 days)</span>
+Get-QuarantineMessage -SenderAddress info@webvendor.example `
+  -StartReceivedDate (Get-Date).AddDays(-30) |
+  Select ReceivedTime, RecipientAddress, Subject, QuarantineTypes
+<span class="cm"># → no messages</span>
+
+<span class="cm"># Is it on the Tenant Allow/Block List?</span>
+Get-TenantAllowBlockListItems -ListType Sender | ? Value -like "*webvendor*"
+<span class="cm"># → no entries</span>
+
+<span class="cm"># Is it referenced in any anti-spam policy?</span>
+Get-HostedContentFilterPolicy |
+  Select Name, AllowedSenderDomains, BlockedSenderDomains |
+  ? { ($_ | Out-String) -match "webvendor" }
+<span class="cm"># → found in the DEFAULT policy's allowed domains</span></pre>
+
+<p>So the vendor's domain <em>was</em> on an allow-list — in the <strong>Default</strong> anti-spam policy. The problem: the headers said that allow was never applied (<span class="k">NSPM</span>, not <span class="k">SKA</span>). That contradiction only resolves one way: <strong>the Default policy does not cover these mailboxes.</strong></p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Exchange Online matches each recipient address to an anti-spam policy by priority. A custom policy scoped to the primary domain wins for primary addresses; every other accepted domain falls to the Default catch-all. Allow and block lists embedded in a policy only protect that policy's scope, but Tenant Allow/Block List entries apply to every recipient.">
+  <text class="lab" x="24" y="30">WHICH RECIPIENT FALLS TO WHICH POLICY</text>
+
+  <rect x="24" y="48" width="320" height="150" rx="12" fill="#0A2733" stroke="#5AC8DA" stroke-width="1.2"/>
+  <text class="h" x="40" y="74">Custom policy</text>
+  <text class="s" x="40" y="94">scope: primary domain, priority 0</text>
+  <text class="m c" x="40" y="118">covers: user@company.com</text>
+  <text class="s" x="40" y="140">allow/block lists here protect</text>
+  <text class="s" x="40" y="156">ONLY the primary domain</text>
+  <text class="m a" x="40" y="182">(one mailbox excepted → falls to Default)</text>
+
+  <rect x="376" y="48" width="320" height="150" rx="12" fill="#241F0C" stroke="#F2D45C" stroke-width="1.1"/>
+  <text class="h" x="392" y="74">Default (catch-all)</text>
+  <text class="s" x="392" y="94">everything no custom rule matched</text>
+  <text class="m a" x="392" y="118">secondary domains · onmicrosoft</text>
+  <text class="s" x="392" y="140">the big allow/block lists people</text>
+  <text class="s" x="392" y="156">kept adding here protect</text>
+  <text class="m r" x="392" y="182">almost nobody</text>
+
+  <rect x="24" y="222" width="672" height="56" rx="12" fill="#0C2417" stroke="#6FD08C" stroke-width="1.4"/>
+  <text class="h" x="40" y="246">Tenant Allow/Block List</text>
+  <text class="b" x="40" y="266">applies to <tspan class="g">every recipient in every accepted domain</tspan>, whichever policy covers them</text>
+</svg>
+</div>
+<figcaption><b>The scoping trap.</b> A custom policy, created years earlier and scoped to the whole primary domain, was the effective policy for nearly every mailbox. All the allow and block entries accumulated in <em>Default</em> protected only the handful of addresses on secondary domains. The Tenant Allow/Block List is the one place that sidesteps the whole question.</figcaption>
+</figure>
+
+<p>The mechanism, in plain terms: Exchange Online matches each <strong>recipient address</strong> (not the user) against enabled custom policy rules in priority order; the first match wins; anything unmatched falls to Default. Here a long-forgotten custom policy — named after a single vendor someone wanted to block years ago, then scoped to the entire domain — quietly became the real policy for almost everyone. So:</p>
+
+<ul>
+  <li><strong>Default's block list protected almost no one.</strong> Senders the client believed were blocked could still reach most mailboxes.</li>
+  <li><strong>Default's allow list bypassed filtering only for the stragglers</strong> — a few secondary-domain aliases and one excepted mailbox.</li>
+  <li><strong>The vendor allow entry had no effect</strong> for the primary-domain recipients it was supposed to protect. The relay reached the Inbox on its own clean reputation, not because anyone had allow-listed it.</li>
+</ul>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>A "missing cmdlet" usually means missing rights</h3><p>The first attempt to add the block failed with <span class="k">New-TenantAllowBlockListItems is not recognized</span>. Exchange Online only imports the cmdlets your session's roles permit, so a read-only role surfaces as a <em>missing</em> cmdlet rather than an access-denied error. <span class="k">Get-Command *TenantAllowBlockListItems*</span> showed only the <span class="k">Get-</span> verb loaded. Reconnecting with a write-capable role fixed it.</p></div>
+</div>
+
+<h2 class="head"><span class="num">05</span>The fix</h2>
+<p class="sub">Block the lookalike tenant-wide; protect the real relay with an authentication-conditioned rule.</p>
+
+<p>Two changes, both designed to be immune to the scoping trap above. The block goes in the Tenant Allow/Block List so it covers every recipient regardless of policy. The allow is a transport rule that only fires when the vendor's <em>own</em> DKIM validates — so a forged From address gets no free pass, and malware/Safe Attachments scanning still applies.</p>
+
+<pre class="code"><span class="cm"># 1 — block the lookalike domain for the whole tenant, no expiry</span>
+New-TenantAllowBlockListItems -ListType Sender -Block `
+  -Entries "keystonebolts.com" -NoExpiration `
+  -Notes "lookalike of keystonebolt.com (website-form pretext)"
+
+<span class="cm"># 2 — guarantee the real form relay is never quarantined,</span>
+<span class="cm">#     but ONLY when the vendor's DKIM actually passes</span>
+New-TransportRule -Name "Allow web form relay (DKIM pass)" `
+  -From "info@webvendor.example" `
+  -HeaderMatchesMessageHeader "Authentication-Results" `
+  -HeaderMatchesPatterns "dkim=pass[^;]*header\.d=webvendor\.example" `
+  -SetSCL -1 `
+  -Comments "website form submissions must never be quarantined" `
+  -Priority 0</pre>
+
+<p>The block does double duty: it stops the attacker's <em>follow-up</em> mail — the second-stage message sent directly from the lookalike domain, which is where the actual payload would arrive — and, per Microsoft's docs, a sender/domain block also stops users <em>sending to</em> that domain (worth a test send to confirm). The transport rule's DKIM condition is the important bit: an unconditioned "allow this sender" rule is itself a spoofing hole.</p>
+
+<div class="takeaway">
+  <p class="tag">The one-line model</p>
+  <p>Put sender allows and blocks in the Tenant Allow/Block List, not inside an anti-spam policy — policy lists silently depend on policy scoping. And never allow a relay by address alone; condition it on the relay's own DKIM, or you've built the spoofing bypass yourself.</p>
+</div>
+
+<h2 class="head"><span class="num">06</span>Triage checklist for relayed form mail</h2>
+<p class="sub">When the envelope is trusted and identical every time, the verdict lives entirely in the fields.</p>
+
+<ol>
+  <li><strong>Confirm it's the real relay.</strong> Expected From address, expected Message-Id domain, DKIM pass for the vendor. If authentication fails, you're looking at spoofing of the relay itself — a different problem.</li>
+  <li><strong>Identify the form</strong> from the subject (quote request vs contact-us). They behave differently on reply.</li>
+  <li><strong>Extract the submitted email domain, phone and website.</strong></li>
+  <li><strong>Look up the claimed company independently</strong> and compare its real domain and phone against the submitted values — <em>character by character</em>. A one-character domain difference is decisive.</li>
+  <li><strong>Check the submitted domain's age</strong> and whether it hosts a real site.</li>
+  <li><strong>Read the request.</strong> Real quote requests name parts, quantities, materials, drawings. A vague "business opportunity" whose only ask is an email address is a pretext.</li>
+  <li><strong>For submissions with attachments,</strong> confirm Safe Attachments scanned them before advising anyone.</li>
+  <li><strong>For contact-us forms, warn that Reply goes straight to the submitted address</strong> — lookalike domains included.</li>
+  <li><strong>If any indicator fails,</strong> block the submitted domain in the Tenant Allow/Block List and run a message trace for any outbound replies.</li>
+</ol>
+
+<pre class="code"><span class="cm"># did anyone reply to the lookalike before the block went in?</span>
+Get-MessageTraceV2 -RecipientAddress "*@keystonebolts.com" `
+  -StartDate (Get-Date).AddDays(-10) -EndDate (Get-Date) |
+  Select Received, SenderAddress, RecipientAddress, Subject, Status</pre>
+
+<div class="tldr">
+<ul>
+  <li><b>Symptom:</b> a clean, fully authenticated website-form notification cleared as a legitimate sales inquiry.</li>
+  <li><b>Root cause:</b> the sender's email domain was a one-character lookalike of a real vendor's — a first-stage pretext with no payload, invisible to envelope and body checks alike.</li>
+  <li><b>Both reviews missed it:</b> the automated pass judged the envelope ("bulk platform → spam"), the analyst judged the body ("no payload → legitimate"); neither compared the field values to the real vendor.</li>
+  <li><b>Exposed underneath:</b> a forgotten custom anti-spam policy scoped to the whole domain meant the allow/block lists in Default protected almost nobody.</li>
+  <li><b>Fix:</b> block the lookalike in the Tenant Allow/Block List; allow the real relay with a DKIM-conditioned transport rule; move sender allows/blocks out of policy lists.</li>
+</ul>
+</div>
+
+<div class="sources">
+<h2>Sources &amp; further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/defender-office-365/tenant-allow-block-list-about">Manage the Tenant Allow/Block List</a><span>why TABL entries apply tenant-wide, independent of policy scope</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/defender-office-365/anti-spam-policies-configure">Configure anti-spam policies</a><span>how recipient-to-policy matching and priority actually work</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/defender-office-365/message-headers-eop-mdo">Anti-spam message headers</a><span>reading SFV:NSPM vs SFV:SKA and the SCL verdict</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/exchange/security-and-compliance/mail-flow-rules/mail-flow-rules">Mail flow (transport) rules</a><span>conditioning a rule on an authentication-results header</span></li>
+</ul>
+</div>
+
+<p class="disclaimer">Anonymised from real support work. Client, vendor, domain, person and ticket details have been changed; the mechanism and the mistake are real.</p>
+
+</div>
+</article>
+
+<div class="connect">
+<div class="row"><span class="lab">Filed under</span><a class="lk" href="/email/inbound.html"><div class="t">Email Security › Inbound security</div><div class="d">Browse this part of the knowledge base.</div></a></div>
+<div class="row"><span class="lab">Related</span><div class="grid2"><a class="lk" href="/posts/phishing-trusted-sender.html"><div class="t">When the sender is real and the email still isn’t</div><div class="d">Email Security · Inbound security</div></a><a class="lk" href="/posts/email-delivery.html"><div class="t">Why your mail lands where it lands</div><div class="d">Email Security · Delivery &amp; mail flow</div></a></div></div>
+</div>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Ground Truth</span>
+  <span><a href="/">Home</a> · <a href="/email/">Email</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>
