@@ -30,6 +30,10 @@
   @media (max-width:640px){ .mr{grid-template-columns:1fr}
     .cmp{font-size:12.5px} .cmp th,.cmp td{padding:8px 9px; overflow-wrap:anywhere}
     .k.long{white-space:normal; overflow-wrap:anywhere} }
+  .dl{display:inline-flex; align-items:center; font-family:var(--mono); font-size:13px; color:var(--accent);
+    border:1px solid var(--accent-dim); border-radius:9px; padding:11px 16px; text-decoration:none;
+    background:var(--signal-bg); margin:20px 0; transition:border-color .2s}
+  .dl:hover{border-color:var(--accent)}
 </style>
 </head>
 <body>
@@ -259,7 +263,187 @@
   </div>
 </div>
 
-<h2 class="head"><span class="num">06</span>Reusable lessons</h2>
+<h2 class="head"><span class="num">06</span>The Exchange-side toolkit</h2>
+<p class="sub">Everything on the Exchange side is scripted and reusable. No secrets, tenant IDs or real user data &mdash; fill in one config file per client.</p>
+
+<p>The build above isn't a one-off; it's seven PowerShell scripts that resolve the mailboxes, scan for existing replies, stand up the plumbing, go live, roll back and troubleshoot. The Power Automate flow and the Entra (Graph) app are set up separately. Here's the whole kit:</p>
+
+<table class="cmp">
+  <tr><th>File</th><th>What it does</th><th>Changes anything?</th></tr>
+  <tr><td><strong>00-Config.ps1</strong></td><td>Shared settings (domain, object names, paths), dot-sourced by all scripts</td><td>No</td></tr>
+  <tr><td><strong>01-Resolve-Mailboxes.ps1</strong></td><td>Names &rarr; Scope.csv via fuzzy name match (ANR), with a report of MULTIPLE / NOT FOUND</td><td>No</td></tr>
+  <tr><td><strong>02-Scan-ExistingReplies.ps1</strong></td><td>Finds every existing OOF and reply/forward/Outlook-only rule in scope, with full backups</td><td>No</td></tr>
+  <tr><td><strong>03-Setup-Prerequisites.ps1</strong></td><td>Intake mailbox, scope group, flow permissions, and the mail-flow rule</td><td><span class="rk rk-high">Yes</span> (one-time)</td></tr>
+  <tr><td><strong>04-GoLive.ps1</strong></td><td>Backup &rarr; disable old replies &rarr; add to group &rarr; widen the rule &rarr; verify. Supports <span class="k">-WhatIf</span></td><td><span class="rk rk-high">Yes</span></td></tr>
+  <tr><td><strong>05-Rollback.ps1</strong></td><td>Restores the rule, group, inbox rules and OOF from a go-live backup. Supports <span class="k">-WhatIf</span></td><td><span class="rk rk-care">Yes</span></td></tr>
+  <tr><td><strong>06-Troubleshoot.ps1</strong></td><td>Message trace, rules hit, rule order, in-scope check, OOF view, permissions</td><td>No</td></tr>
+</table>
+
+<p><strong>Order of use:</strong></p>
+<ol>
+  <li><span class="k">01</span> &mdash; resolve the client's name list into addresses; confirm the scope with the client.</li>
+  <li><span class="k">02</span> &mdash; scan for existing replies; decide together what to switch off at go-live. Check Power Automate for stray flows too.</li>
+  <li><span class="k">03</span> &mdash; with 1&ndash;2 pilot mailboxes in scope. Build the flow, pilot, test.</li>
+  <li>Put the final list in <span class="k">Scope.csv</span>; fill the teardown files from the scan.</li>
+  <li><span class="k">04 -WhatIf</span>, then <span class="k">04</span>. Smoke-test from an external address.</li>
+  <li>Monitor a day or two; close the change. <span class="k">05</span> only if you need to undo.</li>
+</ol>
+
+<a class="dl" href="/assets/downloads/central-auto-reply-toolkit.zip" download>&#8681;&nbsp; Download the toolkit &mdash; 7 scripts + config + samples (.zip)</a>
+
+<p>The config file is the only thing you edit per deployment; every script reads it:</p>
+<p style="font-family:var(--mono);font-size:12.5px;color:var(--ink-3);margin:18px 0 6px"><b style="color:var(--ink)">00-Config.ps1</b> &mdash; shared settings, dot-sourced by every script. Fill in once per client.</p>
+<pre class="code"><span class="cm">&lt;#</span>
+<span class="cm">  Central Auto-Reply toolkit - shared settings. Every script dot-sources this file.</span>
+<span class="cm">  Fill in once per deployment. NEVER put secrets, client secrets or passwords here.</span>
+<span class="cm">#&gt;</span>
+
+<span class="cm"># Tenant / naming</span>
+$Domain        = &#x27;contoso.org&#x27;<span class="cm">                                  # client&#x27;s primary mail domain</span>
+$Prefix        = &#x27;teamautoreply&#x27;<span class="cm">                                # short name used for all objects</span>
+
+<span class="cm"># Objects the solution uses</span>
+$FlowAccount   = &quot;svc-automation@$Domain&quot;<span class="cm">                       # account that owns the flow + connections</span>
+$IntakeMailbox = &quot;$Prefix-intake@$Domain&quot;<span class="cm">                       # hidden shared mailbox the flow watches</span>
+$ScopeGroup    = &quot;$Prefix-scope@$Domain&quot;<span class="cm">                        # mail-enabled security group read by the flow (Graph)</span>
+$ReplyFrom     = &quot;team@$Domain&quot;<span class="cm">                                 # central address replies are sent from</span>
+$RuleName      = &quot;$Prefix - BCC external mail to intake&quot;<span class="cm">        # Exchange mail flow rule</span>
+$RuleComment   = &#x27;INC0000000 / CHG0000000&#x27;<span class="cm">                      # ticket / change reference</span>
+
+<span class="cm"># In-scope mailboxes: one address per line in Scope.csv (column: Address).</span>
+<span class="cm"># Build it with 01-Resolve-Mailboxes.ps1 or by hand.</span>
+$ScopeCsv      = Join-Path $PSScriptRoot &#x27;Scope.csv&#x27;
+
+<span class="cm"># Where reports and backups go</span>
+$WorkRoot      = &#x27;C:\Temp\CentralAutoReply&#x27;
+
+function Get-ScopeAddresses {
+    if (-not (Test-Path $ScopeCsv)) { throw &quot;Scope.csv not found at $ScopeCsv&quot; }
+    @(Import-Csv $ScopeCsv | ForEach-Object { $_.Address.Trim() } | Where-Object { $_ })
+}
+
+function New-WorkFolder ([string]$Name) {
+    $p = Join-Path $WorkRoot &quot;$Name-$(Get-Date -Format yyyyMMdd-HHmm)&quot;
+    New-Item -ItemType Directory -Path $p -Force | Out-Null
+    $p
+}</pre>
+
+<p>The one script that changes anything structural is <span class="k">03</span>. It's the entire Exchange build &mdash; and the comments in it are the gotchas from the section above, written where they bite:</p>
+<p style="font-family:var(--mono);font-size:12.5px;color:var(--ink-3);margin:18px 0 6px"><b style="color:var(--ink)">03-Setup-Prerequisites.ps1</b> &mdash; the whole Exchange build in one script: intake mailbox, scope group, flow permissions, and the mail-flow rule with its loop guards.</p>
+<pre class="code"><span class="cm">&lt;#</span>
+<span class="cm">  03 - Create the Exchange side of the central auto-reply (run ONCE per deployment)</span>
+<span class="cm">  Creates: hidden intake mailbox, hidden scope group, flow-account permissions,</span>
+<span class="cm">           mail flow rule that BCCs external mail for in-scope boxes to the intake.</span>
+<span class="cm">  Start with 1-2 pilot mailboxes in Scope.csv; widen at go-live with 04-GoLive.ps1.</span>
+<span class="cm">  Not here (do in Entra): Graph app with MailboxSettings.Read, GroupMember.Read.All,</span>
+<span class="cm">  User.ReadBasic.All (application, admin-consented). Keep the secret out of every file.</span>
+<span class="cm">#&gt;</span>
+. &quot;$PSScriptRoot\00-Config.ps1&quot;
+$Scope = Get-ScopeAddresses
+
+<span class="cm"># 1. Intake mailbox - flow watches it; hidden from the GAL</span>
+New-Mailbox -Shared -Name &quot;$Prefix-intake&quot; -DisplayName &quot;$Prefix intake&quot; -PrimarySmtpAddress $IntakeMailbox
+Set-Mailbox $IntakeMailbox -HiddenFromAddressListsEnabled $true
+Add-MailboxPermission $IntakeMailbox -User $FlowAccount -AccessRights FullAccess -AutoMapping $false
+
+<span class="cm"># 2. Scope group - the flow reads its members through Graph to decide whose OOF to check</span>
+New-DistributionGroup -Name &quot;$Prefix-scope&quot; -Type Security -PrimarySmtpAddress $ScopeGroup -Members $Scope
+Set-DistributionGroup $ScopeGroup -HiddenFromAddressListsEnabled $true -RequireSenderAuthenticationEnabled $true
+Write-Host &quot;Group object ID for the flow:&quot; -ForegroundColor Cyan
+Get-DistributionGroup $ScopeGroup | Select-Object DisplayName, ExternalDirectoryObjectId
+
+<span class="cm"># 3. Reply-from mailbox - the flow needs BOTH Full Access and Send As</span>
+<span class="cm">#    (Send As alone gives 404 ErrorItemNotFound on &quot;Send an email from a shared mailbox (V2)&quot;).</span>
+<span class="cm">#    Allow up to ~60 min for permissions to apply.</span>
+Add-MailboxPermission   $ReplyFrom -User $FlowAccount -AccessRights FullAccess -AutoMapping $false
+Add-RecipientPermission $ReplyFrom -Trustee $FlowAccount -AccessRights SendAs -Confirm:$false
+
+<span class="cm"># 4. Mail flow rule - DIRECT SentTo list (not SentToMemberOf: group changes are cached for hours)</span>
+<span class="cm">#    Loop guards: OOF messages, Auto-Submitted auto-*, Precedence bulk/list/junk, spam (SCL &gt; 4).</span>
+New-TransportRule -Name $RuleName -Comments $RuleComment `
+    -FromScope NotInOrganization `
+    -SentTo $Scope `
+    -BlindCopyTo $IntakeMailbox `
+    -ExceptIfMessageTypeMatches OOF `
+    -ExceptIfHeaderMatchesMessageHeader &#x27;Auto-Submitted&#x27; -ExceptIfHeaderMatchesPatterns &#x27;^auto-&#x27; `
+    -ExceptIfHeaderContainsMessageHeader &#x27;Precedence&#x27; -ExceptIfHeaderContainsWords &#x27;bulk&#x27;,&#x27;list&#x27;,&#x27;junk&#x27; `
+    -ExceptIfSCLOver 4 -Mode Enforce
+
+<span class="cm"># 5. Rule ORDER check. Any rule above ours with StopRuleProcessing = True (e.g. a mail</span>
+<span class="cm">#    gateway such as Egress / Mimecast that routes mail out and back) must stay ABOVE ours.</span>
+<span class="cm">#    Ours must sit below it so it fires on the return pass. Never move ours above a gateway rule.</span>
+Get-TransportRule | Sort-Object Priority | Format-Table Priority, Name, State, StopRuleProcessing -AutoSize
+
+<span class="cm"># 6. Verify</span>
+Get-Mailbox $IntakeMailbox | Select-Object DisplayName, RecipientTypeDetails, HiddenFromAddressListsEnabled
+Get-DistributionGroupMember $ScopeGroup | Select-Object DisplayName, PrimarySmtpAddress
+Get-MailboxPermission $ReplyFrom   | Where-Object User -like &quot;*$FlowAccount*&quot;
+Get-RecipientPermission $ReplyFrom | Where-Object Trustee -like &quot;*$FlowAccount*&quot;
+Get-TransportRule $RuleName | Format-List Name, State, Priority, FromScope, SentTo, BlindCopyTo, Except*
+Write-Host &quot;New mail flow rules can take up to ~30 min to apply.&quot; -ForegroundColor Yellow
+
+<span class="cm"># Remove everything (test / abandon only):</span>
+<span class="cm"># Remove-TransportRule $RuleName -Confirm:$false</span>
+<span class="cm"># Remove-DistributionGroup $ScopeGroup -Confirm:$false</span>
+<span class="cm"># Remove-Mailbox $IntakeMailbox -Confirm:$false</span></pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>Direct <span class="k">SentTo</span> list, not <span class="k">SentToMemberOf</span></h3><p>The rule takes the scope as an explicit recipient list, not a group, because transport rules cache group membership for hours &mdash; new pilot members simply weren't matched. The group still exists; the <em>flow</em> reads it through Graph (instant) to decide whose out-of-office to check. Two different needs, two different mechanisms.</p></div>
+</div>
+
+<p>And the read-only troubleshooting helpers &mdash; dot-source the file, then call the function you need:</p>
+<p style="font-family:var(--mono);font-size:12.5px;color:var(--ink-3);margin:18px 0 6px"><b style="color:var(--ink)">06-Troubleshoot.ps1</b> &mdash; read-only diagnostics: trace a test, see which rules fired, check scope, permissions and rule order.</p>
+<pre class="code"><span class="cm">&lt;#</span>
+<span class="cm">  06 - Troubleshooting helpers (READ-ONLY). Dot-source, then call the function you need:</span>
+<span class="cm">     . .\06-Troubleshoot.ps1</span>
+<span class="cm">     Trace-AutoReply -Subject &#x27;IT check&#x27; -Minutes 30</span>
+<span class="cm">#&gt;</span>
+. &quot;$PSScriptRoot\00-Config.ps1&quot;
+
+<span class="cm"># Did the rule copy the email to intake, and did a reply go out?</span>
+function Trace-AutoReply ([string]$Subject, [int]$Minutes = 60) {
+    Get-MessageTraceV2 -StartDate (Get-Date).AddMinutes(-$Minutes) -EndDate (Get-Date) |
+        Where-Object Subject -like &quot;*$Subject*&quot; | Sort-Object Received |
+        Format-Table @{n=&#x27;Local&#x27;;e={$_.Received.ToLocalTime()}}, SenderAddress, RecipientAddress, Subject, Status -AutoSize
+}
+
+<span class="cm"># Which rules acted on one message? (detail lists ONLY rules that matched - absence = did not match)</span>
+function Get-RulesHit ([string]$Recipient, [string]$Subject, [int]$Hours = 2) {
+    Get-MessageTraceV2 -RecipientAddress $Recipient -StartDate (Get-Date).AddHours(-$Hours) -EndDate (Get-Date) |
+        Where-Object Subject -like &quot;*$Subject*&quot; | ForEach-Object {
+            &quot;----- $($_.Received.ToLocalTime())  $($_.Subject)&quot;
+            $_ | Get-MessageTraceDetailV2 | Where-Object Event -match &#x27;Transport rule&#x27; | Format-Table Date, Event, Detail -Wrap
+        }
+}
+
+<span class="cm"># Rule order - gateway rules with StopRuleProcessing must sit ABOVE ours</span>
+function Show-RuleOrder { Get-TransportRule | Sort-Object Priority | Format-Table Priority, Name, State, StopRuleProcessing -AutoSize }
+
+<span class="cm"># Is an address actually in scope?</span>
+function Test-InScope ([string]$Address) {
+    [pscustomobject]@{
+        Address = $Address
+        InRule  = ((Get-TransportRule $RuleName).SentTo -contains $Address)
+        InGroup = ((Get-DistributionGroupMember $ScopeGroup -ResultSize Unlimited).PrimarySmtpAddress -contains $Address)
+    }
+}
+
+<span class="cm"># What will the flow see for this mailbox&#x27;s out-of-office?</span>
+function Get-OofView ([string]$Address) {
+    Get-MailboxAutoReplyConfiguration $Address | Select-Object Identity, AutoReplyState, ExternalAudience, StartTime, EndTime
+}
+
+<span class="cm"># Flow account permissions (404 on send = Full Access missing on reply-from)</span>
+function Test-FlowPermissions {
+    Get-MailboxPermission   $IntakeMailbox | Where-Object User -like &quot;*$FlowAccount*&quot; | Select-Object Identity, User, AccessRights
+    Get-MailboxPermission   $ReplyFrom     | Where-Object User -like &quot;*$FlowAccount*&quot; | Select-Object Identity, User, AccessRights
+    Get-RecipientPermission $ReplyFrom     | Where-Object Trustee -like &quot;*$FlowAccount*&quot; | Select-Object Identity, Trustee, AccessRights
+}
+
+Write-Host &#x27;Loaded: Trace-AutoReply, Get-RulesHit, Show-RuleOrder, Test-InScope, Get-OofView, Test-FlowPermissions&#x27; -ForegroundColor Green</pre>
+
+<h2 class="head"><span class="num">07</span>Reusable lessons</h2>
 <p class="sub">The pattern fits any "shared response for a team" request. These save time on the next one.</p>
 
 <ul>
