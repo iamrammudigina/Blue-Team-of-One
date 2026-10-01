@@ -1,4 +1,4 @@
-/* Blue Team of One — console theatre: ⌘K palette, copy buttons, terminal, progress */
+/* Ground Truth — console theatre: ⌘K palette, copy buttons, terminal, progress */
 (function(){
   "use strict";
   var reduce = window.matchMedia("(prefers-reduced-motion:reduce)").matches;

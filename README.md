@@ -1,4 +1,4 @@
-# Blue Team of One — a security field-notes blog
+# Ground Truth — a security field-notes blog
 
 A plain static website. **No build step, no framework, nothing to break.**
 Every page is a standalone HTML file served directly by Cloudflare Pages.
@@ -69,9 +69,13 @@ across all pages so browsers load the new version instead of a cached copy.
 - `<div class="sources">` — a further-reading list
 - `<h2 class="head"><span class="num">NN</span>Heading</h2>` — numbered section head
 
-## Rename / re-theme
-"Blue Team of One" appears in each page's masthead, `<title>`, and footer.
-Swap the accent color via `--teal` in `assets/style.css`.
+## Theming
+Light/dark is adaptive: it follows the OS by default and a toggle in the nav
+lets readers override it (saved to `localStorage` as `gt-theme`). All colours
+are CSS variables in `assets/style.css` — the light `:root` set, a
+`@media (prefers-color-scheme: dark)` auto set, and a `:root[data-theme="dark"]`
+explicit set. A no-flash inline script in each page `<head>` applies the saved
+choice before first paint; `assets/theme.js` injects the toggle button.
 
 ## Before publishing — sanitization checklist
 Client-adjacent work must be generalized in every public post:
