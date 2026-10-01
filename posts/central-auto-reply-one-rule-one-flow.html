@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>One auto-reply for 21 mailboxes, not 21 rules — Ground Truth</title>
+<meta name="description" content="A team wanted every external email to its 21 mailboxes answered with one standard reply, exactly once, from one central address — and no built-in feature does all of that. The funnel-then-decide design: one Exchange mail-flow rule, one Power Automate flow, and the gotchas that cost time.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;680;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=32">
+<style>
+  figure.diagram{margin:30px 0; padding:0}
+  figure.diagram .scroll{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  figure.diagram svg{display:block; width:100%; min-width:640px; height:auto;
+    background:#0A1E42; border:1px solid #1E3E70; border-radius:10px}
+  figure.diagram figcaption{margin-top:10px; font-family:var(--mono); font-size:12.5px; color:var(--ink-3); line-height:1.5}
+  figure.diagram figcaption b{color:var(--ink-2)}
+  .dg .lab{font-family:var(--mono); font-size:10.5px; letter-spacing:.08em; fill:#7C8DB3}
+  .dg .h{font-family:var(--mono); font-size:13px; font-weight:700; fill:#EAEEF6}
+  .dg .b{font-family:var(--sans); font-size:12.5px; fill:#B7C4DD}
+  .dg .s{font-family:var(--sans); font-size:11.5px; fill:#7C8DB3}
+  .dg .m{font-family:var(--mono); font-size:11px; fill:#B7C4DD}
+  .dg .pill{font-family:var(--mono); font-size:10.5px; font-weight:700}
+  .dg .g{fill:#6FD08C} .dg .a{fill:#F2D45C} .dg .c{fill:#5AC8DA} .dg .v{fill:#b79bff} .dg .r{fill:#F76F72} .dg .x{fill:#7C8DB3}
+  pre .cr{color:#f0868a}
+  .tldr{border:1px solid var(--line); border-radius:8px; background:var(--bg-2); padding:6px 18px; margin:26px 0}
+  .tldr li{margin:10px 0; color:var(--ink-2)}
+  .tldr b{color:var(--ink)}
+  @media (max-width:640px){ .mr{grid-template-columns:1fr}
+    .cmp{font-size:12.5px} .cmp th,.cmp td{padding:8px 9px; overflow-wrap:anywhere}
+    .k.long{white-space:normal; overflow-wrap:anywhere} }
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Ground <b>Truth</b></span>
+      <span class="tag">field notes · a blue team of one</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/" aria-current="page">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/email/">Email Security</a><span class="sep">›</span><a href="/email/delivery.html">Delivery &amp; mail flow</a></p>
+    <p class="eyebrow"><span class="dot"></span>Deep dive + field case · mail flow automation</p>
+    <h1>One auto-reply for 21 mailboxes, <em>not 21 rules</em></h1>
+    <p class="lede">A team wanted every external email to its 21 mailboxes answered with one standard reply — every message, not just the first from each sender, nobody marked "Away," all replies from one central address. No built-in Exchange or Outlook feature does all five of those at once. Here's the design that does, and why the obvious ones quietly fail each requirement.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>October 1, 2026</span>
+      <span>~13 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>"Just put an auto-reply on the mailbox" is one of those requests that sounds like a five-minute job and turns into an architecture decision. The moment you write down what the client actually wants, every built-in feature fails at least one requirement — and the naive fix (one automation per mailbox) scales into a maintenance mess that bites the first time anyone changes the wording. The interesting part of this build wasn't the automation; it was the <em>shape</em> of it.</p>
+
+<p>The one idea worth keeping: <strong>when "N mailboxes each need the same behaviour," don't build N copies of anything. Funnel them into one place and decide once.</strong></p>
+
+<h2 class="head"><span class="num">01</span>Five requirements that kill the obvious options</h2>
+<p class="sub">Write the requirements down first. The feature comparison then makes the decision for you.</p>
+
+<p>The ask, pinned down, was five rules:</p>
+<ol>
+  <li><strong>External senders only.</strong> Internal staff never trigger a reply.</li>
+  <li><strong>Every email gets the reply</strong>, not just the first one from each sender.</li>
+  <li><strong>Nobody shows as "Away"</strong> in Outlook or Teams.</li>
+  <li><strong>All replies come from one central address</strong> (<span class="k">licensing@</span>), not from each person's mailbox.</li>
+  <li><strong>Leave cover:</strong> when a team member is actually on leave, <em>their own</em> out-of-office answers instead; if they're the main recipient, only their OOF goes out.</li>
+</ol>
+
+<p>Line those five up against the mechanisms people reach for, and every row but the last fails somewhere:</p>
+
+<table class="cmp">
+  <tr><th>Option</th><th>External only</th><th>Every email</th><th>No "Away"</th><th>One central sender</th><th>Verdict</th></tr>
+  <tr><td>Out-of-office per mailbox</td><td>Yes</td><td><span class="k">No</span> — once per sender</td><td><span class="k">No</span> — shows Away</td><td><span class="k">No</span> — each mailbox</td><td>Rejected</td></tr>
+  <tr><td>Outlook "reply with template" rule</td><td>Yes</td><td><span class="k">No</span> — once per session</td><td>Yes</td><td><span class="k">No</span> — each mailbox</td><td>Runs only while that PC's Outlook is open</td></tr>
+  <tr><td>Mail-flow rule alone</td><td>Yes</td><td>n/a</td><td>Yes</td><td>n/a</td><td>Can only redirect/reject — <strong>can't compose a reply</strong></td></tr>
+  <tr><td>21 flows, one per mailbox</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Duplicate replies when several staff are addressed; 21 flows to maintain</td></tr>
+  <tr><td><strong>One mail-flow rule + one flow</strong></td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td><span class="rk rk-routine">Chosen</span></td></tr>
+</table>
+
+<p>The weakest of the lot is the one teams usually already have: per-user Outlook rules. They run on each person's PC, stop the moment Outlook is closed, and can't be seen or managed centrally. The out-of-office option fails three rules at once (once-per-sender, marks you Away, sends from each mailbox). And a mail-flow rule on its own is a dead end for this job — transport rules can redirect, copy or reject a message, but they cannot <em>generate a reply</em>. You need something that can compose mail. That's the flow's job.</p>
+
+<h2 class="head"><span class="num">02</span>The pattern: funnel, then decide</h2>
+<p class="sub">One transport rule turns "21 mailboxes" into "one inbox." One flow reads that inbox and replies once.</p>
+
+<p>The redesign that made it work is a single move: a mail-flow rule <strong>BCCs a copy</strong> of every qualifying external email into one hidden intake mailbox — one copy per message, however many of the team it was sent to. A single flow watches that one inbox, works out which team members were actually addressed, and sends exactly one reply. The team's real mailboxes are never touched.</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Many team mailboxes receive an external email. One Exchange mail-flow rule blind-copies one copy per message into a single hidden intake mailbox. One Power Automate flow watches that inbox and sends exactly one reply from the central address. This replaces the alternative of one flow per mailbox.">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#7C8DB3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <text class="lab" x="24" y="28">FUNNEL: N MAILBOXES → ONE INTAKE → ONE REPLY</text>
+
+  <rect x="24" y="52" width="150" height="150" rx="10" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h" x="40" y="76">External email</text>
+  <text class="s" x="40" y="98">sent to any of the</text>
+  <text class="s" x="40" y="114">team's 21 mailboxes</text>
+  <text class="m" x="40" y="146">To: staffA, staffB</text>
+  <text class="m" x="40" y="162">Cc: staffC</text>
+  <text class="s" x="40" y="190">delivered normally</text>
+
+  <line x1="174" y1="127" x2="196" y2="127" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+
+  <rect x="198" y="72" width="168" height="110" rx="10" fill="#241F0C" stroke="#F2D45C" stroke-width="1.2"/>
+  <text class="h" x="214" y="96">Mail-flow rule</text>
+  <text class="s" x="214" y="118">external + in scope?</text>
+  <text class="s" x="214" y="134">skip OOF / bulk / auto</text>
+  <text class="m a" x="214" y="160">BCC one copy →</text>
+
+  <line x1="366" y1="127" x2="388" y2="127" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+
+  <rect x="390" y="82" width="150" height="90" rx="10" fill="#1A1640" stroke="#b79bff" stroke-width="1.2"/>
+  <text class="h" x="406" y="106">Hidden intake</text>
+  <text class="s" x="406" y="128">one copy per email,</text>
+  <text class="s" x="406" y="144">however many were</text>
+  <text class="s" x="406" y="160">addressed</text>
+
+  <line x1="540" y1="127" x2="562" y2="127" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+
+  <rect x="564" y="72" width="132" height="110" rx="10" fill="#0C2417" stroke="#6FD08C" stroke-width="1.3"/>
+  <text class="h" x="580" y="96">One flow</text>
+  <text class="s" x="580" y="118">decides &amp; sends</text>
+  <text class="m g" x="580" y="142">one reply from</text>
+  <text class="m g" x="580" y="158">licensing@</text>
+
+  <path d="M30 218 v8 h660 v-8" fill="none" stroke="#6FD08C" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <text class="s" x="360" y="246" text-anchor="middle">The alternative — one flow per mailbox — means 21 flows to maintain and duplicate replies when several staff are on one email.</text>
+  <text class="m g" x="360" y="272" text-anchor="middle">Funnelling makes "exactly one reply per email" free.</text>
+</svg>
+</div>
+<figcaption><b>The whole design in one picture.</b> The transport rule does the fan-in (every qualifying message becomes one copy in one place); the flow does the thinking (who was addressed, is anyone away, reply once). Splitting it this way is what turns 21-of-everything into one-of-everything.</figcaption>
+</figure>
+
+<h2 class="head"><span class="num">03</span>How the flow decides</h2>
+<p class="sub">Read the copy, drop what shouldn't get a reply, find who was really addressed, reply once — unless everyone's away.</p>
+
+<p>The transport rule is deliberately dumb; all the judgement lives in the flow. Running on the one intake mailbox, it:</p>
+<ol>
+  <li><strong>Picks up the copy</strong> (polls the intake inbox every minute).</li>
+  <li><strong>Filters out what must never get a reply:</strong> internal senders, no-reply addresses, and anything whose subject marks it as an auto-reply (the loop guard — more on that below).</li>
+  <li><strong>Works out the main recipients:</strong> the team mailboxes on the <span class="k">To</span> line, or on <span class="k">Cc</span> if none are on <span class="k">To</span>.</li>
+  <li><strong>Reads each one's out-of-office</strong> via Microsoft Graph (read-only).</li>
+  <li><strong>Replies once from <span class="k">licensing@</span></strong> — unless <em>every</em> main recipient is away, in which case their own out-of-office messages answer and the central reply stays quiet.</li>
+</ol>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The flow logic: from the intake copy, drop internal senders, no-reply addresses and auto-reply subjects; find the main recipients on To or else Cc; read each one's out-of-office via Graph; if all are away, their own out-of-office answers; otherwise send one reply from the central address.">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#7C8DB3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <text class="lab" x="24" y="28">THE DECISION, ONCE PER EMAIL</text>
+
+  <rect x="24" y="44" width="120" height="52" rx="9" fill="#1A1640" stroke="#b79bff"/>
+  <text class="h" x="40" y="66">Intake copy</text>
+  <text class="s" x="40" y="84">one per email</text>
+  <line x1="144" y1="70" x2="166" y2="70" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+
+  <rect x="168" y="44" width="150" height="52" rx="9" fill="#26131A" stroke="#F76F72"/>
+  <text class="h" x="184" y="66">Drop these</text>
+  <text class="s" x="184" y="84">internal · no-reply · auto</text>
+  <line x1="318" y1="70" x2="340" y2="70" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+
+  <rect x="342" y="44" width="160" height="52" rx="9" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h" x="358" y="66">Main recipients</text>
+  <text class="s" x="358" y="84">To, else Cc</text>
+  <line x1="502" y1="70" x2="524" y2="70" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+
+  <rect x="526" y="44" width="170" height="52" rx="9" fill="#0A2733" stroke="#5AC8DA"/>
+  <text class="h" x="542" y="66">Read each OOF</text>
+  <text class="s" x="542" y="84">Graph, read-only</text>
+
+  <line x1="611" y1="96" x2="611" y2="128" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+  <path d="M520 128 L611 150 L702 128 L611 106 Z" fill="#0A2733" stroke="#5AC8DA"/>
+  <text class="m c" x="611" y="132" text-anchor="middle">all away?</text>
+
+  <line x1="520" y1="134" x2="372" y2="134" stroke="#6FD08C" stroke-width="1.3" marker-end="url(#a2)"/>
+  <text class="m g" x="505" y="126" text-anchor="end">no</text>
+  <rect x="190" y="150" width="182" height="52" rx="9" fill="#0C2417" stroke="#6FD08C" stroke-width="1.3"/>
+  <text class="h" x="206" y="174">One reply</text>
+  <text class="s" x="206" y="192">from licensing@</text>
+
+  <line x1="611" y1="150" x2="611" y2="178" stroke="#F2D45C" stroke-width="1.3" marker-end="url(#a2)"/>
+  <text class="m a" x="620" y="170">yes</text>
+  <rect x="520" y="180" width="182" height="46" rx="9" fill="#241F0C" stroke="#F2D45C"/>
+  <text class="h" x="536" y="202">Their own OOF answers</text>
+  <text class="s" x="536" y="218">central reply stays quiet</text>
+</svg>
+</div>
+<figcaption><b>The "away" rule is the subtle one.</b> During the pilot the client added that the main <span class="k">To</span> recipient's out-of-office should take priority over CC'd mailboxes — which became a change to one step in the flow, tested the same morning. Centralising the logic is what made that a one-line change instead of twenty-one.</figcaption>
+</figure>
+
+<h2 class="head"><span class="num">04</span>How the design got here</h2>
+<p class="sub">The first build was one flow per mailbox. It worked for one and fell apart at scale.</p>
+
+<p>Worth showing the wrong turn, because it's the one everyone takes first. The initial build was a single flow watching a single mailbox: check the sender is external, check the mailbox has no out-of-office, reply. Fine for one. Then reality:</p>
+<ul>
+  <li><strong>The sender was wrong.</strong> The client wanted replies from one central address, but a per-mailbox flow replies from that mailbox. A flow trigger also watches only one mailbox — so 21 mailboxes meant 21 flows.</li>
+  <li><strong>The duplicate problem.</strong> With 21 flows all replying, an applicant who emailed three team members would get three identical replies. And any wording change meant 21 edits.</li>
+  <li><strong>The redesign.</strong> One transport rule copies every qualifying email into one intake mailbox; one flow does the rest. N-of-everything collapses to one.</li>
+</ul>
+
+<div class="takeaway">
+  <p class="tag">The one-line model</p>
+  <p>A per-item automation that triggers on one mailbox will tempt you to clone it N times. Resist it: a mail-flow rule that BCCs into a single intake mailbox turns "N mailboxes" into "one inbox," and one-reply-per-email falls out for free.</p>
+</div>
+
+<h2 class="head"><span class="num">05</span>What we hit along the way</h2>
+<p class="sub">Every one of these cost time during the pilot. They're the reason this is a field note and not a diagram.</p>
+
+<table class="cmp">
+  <tr><th>Symptom</th><th>Root cause</th><th>Fix</th></tr>
+  <tr><td>Flow ran "successfully" but sent nothing</td><td>The test subject contained the word "autoreply" and tripped the loop filter</td><td>Test with normal subjects; don't let your guard rail eat your test</td></tr>
+  <tr><td>Out-of-office check silently skipped; recipient addresses came back blank</td><td><span class="k">GroupMember.Read.All</span> returns member <em>IDs</em>, not addresses</td><td>Add <span class="k">User.ReadBasic.All</span> to resolve IDs to mailboxes</td></tr>
+  <tr><td>Rule didn't fire for newly added pilot members for over an hour</td><td>Transport rules <strong>cache group membership</strong></td><td>Switch the rule to a direct recipient list (<span class="k">SentTo</span>) while iterating</td></tr>
+  <tr><td>Rule seemed skipped when a mail gateway was in front of Exchange</td><td>Gateway mail passes through Exchange <em>twice</em>; the gateway's own rule is skipped on the return pass</td><td>Keep your rule <em>below</em> the gateway rule; prove where it fires with message trace</td></tr>
+  <tr><td>Send failed <span class="k">404 ErrorItemNotFound</span></td><td>Sending <em>from</em> a shared mailbox needs <strong>Full Access</strong>, not just Send As</td><td>Grant Full Access on <span class="k">licensing@</span> (takes ~25 min to apply)</td></tr>
+  <tr><td>"Blank email" reported by the client</td><td>It was the tester's own empty test message arriving in their inbox</td><td>Always put text in test bodies; confirm with message trace</td></tr>
+  <tr><td>A test showed both an OOF <em>and</em> the auto-reply</td><td>Timing, not logic — the tester's out-of-office was switched off ~70 seconds before the flow ran</td><td>Leave OOF on for several minutes when testing that branch</td></tr>
+</table>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>Message trace shows which rules <em>matched</em>, never why one <em>didn't</em></h3><p>Half of the list above looked like logic bugs and were really environment quirks — gateway double-pass, group-membership cache, permission timing. The only way through is to isolate: change <strong>one variable at a time</strong> and read the message trace (<span class="k">Get-MessageTraceDetailV2</span>) to confirm where your rule actually fired. The trace tells you what happened to the message; it will never tell you why a rule you expected didn't run.</p></div>
+</div>
+
+<div class="mr">
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">N mailboxes that need the same behaviour need N rules or flows.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">Funnel them. One mail-flow rule BCCs every qualifying message into <strong>one</strong> intake mailbox, and one flow decides once. One wording change, one place to maintain.</p></div></div></div>
+  </div>
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">Send As is enough to reply from a shared mailbox in a flow.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">Sending <em>from</em> a shared mailbox needs <strong>Full Access</strong> too, or the send fails <span class="k">404 ErrorItemNotFound</span>. Grant both, and allow up to an hour to apply.</p></div></div></div>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">06</span>Reusable lessons</h2>
+<p class="sub">The pattern fits any "shared response for a team" request. These save time on the next one.</p>
+
+<ul>
+  <li><strong>Map every requirement before choosing a feature.</strong> A one-page requirements table settles the design conversation with the client and shows exactly where each built-in option fails.</li>
+  <li><strong>Funnel, then decide.</strong> A mail-flow rule BCCing into one intake mailbox turns "N mailboxes" into "one inbox" and gives one-reply-per-email for free.</li>
+  <li><strong>Check the mail route before placing a rule.</strong> Tenants with a gateway (Egress, Mimecast and the like) send mail through Exchange twice; confirm where your rule fires with <span class="k">Get-MessageTraceDetailV2</span>.</li>
+  <li><strong>Prefer direct recipient lists in transport rules</strong> while iterating — group membership can lag by hours.</li>
+  <li><strong>Graph app permissions:</strong> <span class="k">MailboxSettings.Read</span> for out-of-office, plus <span class="k">GroupMember.Read.All</span> <em>and</em> <span class="k">User.ReadBasic.All</span> to turn member IDs into addresses.</li>
+  <li><strong>Test like a real user:</strong> a normal subject, text in the body, out-of-office left on for several minutes, and the OOF reset between senders.</li>
+  <li><strong>Keep secrets out of exports.</strong> A client secret stored in a flow appears in any exported package — rotate it after sharing, or use Key Vault.</li>
+  <li><strong>Back up before touching client mailboxes.</strong> <span class="k">Export-Clixml</span> the out-of-office and inbox rules first, and <em>disable</em> old rules rather than deleting them.</li>
+</ul>
+
+<pre class="code"><span class="cm"># back up the old per-mailbox config before replacing it</span>
+Get-MailboxAutoReplyConfiguration licensing@contoso.com |
+  Export-Clixml .\oof-backup.xml
+Get-InboxRule -Mailbox licensing@contoso.com |
+  Export-Clixml .\inboxrules-backup.xml
+
+<span class="cm"># confirm where the rule fires when a gateway is in front of Exchange</span>
+Get-MessageTraceDetailV2 -MessageTraceId &lt;id&gt; -RecipientAddress licensing@contoso.com |
+  Select Date, Event, Detail</pre>
+
+<div class="tldr">
+<ul>
+  <li><b>Goal:</b> one standard reply to every external email across 21 team mailboxes — every message, no "Away," one central sender, with leave cover.</li>
+  <li><b>Why built-ins fail:</b> out-of-office is once-per-sender and marks you Away; Outlook rules die with the PC; a mail-flow rule can't compose a reply; one-flow-per-mailbox means 21 flows and duplicate replies.</li>
+  <li><b>Design:</b> one transport rule BCCs qualifying external mail into one hidden intake mailbox; one flow finds the real recipients, checks each out-of-office via Graph, and replies once from the central address — unless everyone's away.</li>
+  <li><b>Gotchas:</b> loop filter eats "autoreply" test subjects; Graph returns IDs not addresses; transport rules cache group membership; gateways double-pass Exchange; shared-mailbox send needs Full Access.</li>
+</ul>
+</div>
+
+<div class="sources">
+<h2>Sources &amp; further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/exchange/security-and-compliance/mail-flow-rules/mail-flow-rules">Mail flow (transport) rules in Exchange Online</a><span>conditions, BCC actions, and rule ordering</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/graph/api/user-get-mailboxsettings">Get mailbox settings (Graph)</a><span>reading automatic-replies state read-only</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/graph/permissions-reference">Microsoft Graph permissions reference</a><span>MailboxSettings.Read, GroupMember.Read.All, User.ReadBasic.All</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/exchange/monitoring/trace-an-email-message/message-trace-modern-eac">Trace an email message</a><span>confirming which rules fired, and where</span></li>
+</ul>
+</div>
+
+<p class="disclaimer">Anonymised from real support work. Client, team, person and ticket details have been changed; the design, the gotchas and the fixes are real.</p>
+
+</div>
+</article>
+
+<div class="connect">
+<div class="row"><span class="lab">Filed under</span><a class="lk" href="/email/delivery.html"><div class="t">Email Security › Delivery &amp; mail flow</div><div class="d">Browse this part of the knowledge base.</div></a></div>
+<div class="row"><span class="lab">Related</span><div class="grid2"><a class="lk" href="/posts/email-delivery.html"><div class="t">The bounce that lied: when &ldquo;Delivered&rdquo; isn’t delivered</div><div class="d">Email Security · Delivery &amp; mail flow</div></a><a class="lk" href="/posts/delegated-mailbox-access.html"><div class="t">Who can open this mailbox, and how</div><div class="d">Email Security · Mailbox access &amp; delegation</div></a></div></div>
+</div>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Ground Truth</span>
+  <span><a href="/">Home</a> · <a href="/email/">Email</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>
