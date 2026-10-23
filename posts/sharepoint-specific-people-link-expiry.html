@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>(function(){try{var t=localStorage.getItem('gt-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<script defer src="/assets/theme.js?v=1"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Making "Specific people" links expire, per person — Ground Truth</title>
+<meta name="description" content="Microsoft 365 can expire Anyone links but has no admin expiry for Specific people links. How one daily Power Automate flow removes each external reviewer's access N days after they were shared, why it has to age people rather than links, and the 403 and 5,000-item traps that only appear in production.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;680;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=33">
+<style>
+  figure.diagram{margin:30px 0; padding:0}
+  figure.diagram .scroll{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  figure.diagram svg{display:block; width:100%; min-width:640px; height:auto;
+    background:#0A1E42; border:1px solid #1E3E70; border-radius:10px}
+  figure.diagram figcaption{margin-top:10px; font-family:var(--mono); font-size:12.5px; color:var(--ink-3); line-height:1.5}
+  figure.diagram figcaption b{color:var(--ink-2)}
+  .dg .lab{font-family:var(--mono); font-size:10.5px; letter-spacing:.08em; fill:#7C8DB3}
+  .dg .h{font-family:var(--mono); font-size:13px; font-weight:700; fill:#EAEEF6}
+  .dg .b{font-family:var(--sans); font-size:12.5px; fill:#B7C4DD}
+  .dg .s{font-family:var(--sans); font-size:11.5px; fill:#7C8DB3}
+  .dg .m{font-family:var(--mono); font-size:11px; fill:#B7C4DD}
+  .dg .g{fill:#6FD08C} .dg .a{fill:#F2D45C} .dg .c{fill:#5AC8DA} .dg .v{fill:#b79bff} .dg .r{fill:#F76F72} .dg .x{fill:#7C8DB3}
+  @media (max-width:640px){ .mr{grid-template-columns:1fr}
+    .cmp{font-size:12.5px} .cmp th,.cmp td{padding:8px 9px; overflow-wrap:anywhere}
+    .k.long{white-space:normal; overflow-wrap:anywhere}
+    article .k{white-space:normal; overflow-wrap:anywhere}
+    .caveat > div{min-width:0} .caveat h3, .caveat p{overflow-wrap:anywhere}
+    article pre{font-size:11.5px} }
+  .dl{display:inline-flex; align-items:center; font-family:var(--mono); font-size:13px; color:var(--accent);
+    border:1px solid var(--accent-dim); border-radius:9px; padding:11px 16px; text-decoration:none;
+    background:var(--signal-bg); margin:20px 0; transition:border-color .2s}
+  .dl:hover{border-color:var(--accent)}
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Ground <b>Truth</b></span>
+      <span class="tag">field notes · defensive security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/" aria-current="page">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/cloud/">Cloud Security</a><span class="sep">›</span><a href="/cloud/purview-governance.html">Purview &amp; governance</a></p>
+    <p class="eyebrow"><span class="dot"></span>Deep dive + field case · external sharing automation</p>
+    <h1>Making "Specific people" links expire, <em>per person</em></h1>
+    <p class="lede">A team sharing case files with outside reviewers wanted every reviewer's access to end 55 days after it was granted, with nothing to type at share time. Microsoft 365 can't do that: it only expires "Anyone" links. Here's the daily flow that does it, why it has to age <em>people</em> rather than links, and the two traps that only showed up once it was running for real.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>October 23, 2026</span>
+      <span>~14 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>The ticket said "links expire after 30 days, please make it 55." It sounded like a single tenant setting. It wasn't. The 30-day limit the team was blaming had never applied to a single one of their shares, and the setting they wanted doesn't exist for the kind of link they actually use. What fixed it was a small Power Automate flow, but the useful part of this note is how we found out what to build, and the things that were only visible after go-live.</p>
+
+<p>The one idea worth keeping: <strong>a sharing link is not a share date. SharePoint reuses links, so if you want access to end N days after someone was given it, you have to read each person's own invite date.</strong></p>
+
+<h2 class="head"><span class="num">01</span>Prove the cause before you build</h2>
+<p class="sub">The user's explanation was wrong. The tenant settings and 90 days of audit log said so in ten minutes.</p>
+
+<p>Two read-only checks decided everything. First, the tenant's sharing settings (<span class="k">Get-SPOTenant</span>):</p>
+
+<table class="cmp">
+  <tr><th>Setting</th><th>Value</th><th>What it actually means</th></tr>
+  <tr><td><span class="k">RequireAnonymousLinksExpireInDays</span></td><td>30</td><td><strong>Anyone</strong> links expire at 30 days. Nothing else does.</td></tr>
+  <tr><td><span class="k">ExternalUserExpirationRequired</span></td><td>False</td><td>Guest access never expires; the day count next to it is ignored</td></tr>
+  <tr><td><span class="k">DefaultSharingLinkType</span></td><td>Direct</td><td>Shares default to <strong>Specific people</strong></td></tr>
+  <tr><td><span class="k">EnableAzureADB2BIntegration</span></td><td>False</td><td>Yet every share still created an Entra guest at share time</td></tr>
+</table>
+
+<p>Then 90 days of <span class="k">Search-UnifiedAuditLog -RecordType SharePointSharingOperation</span> for the people who share:</p>
+<ul>
+  <li><strong>0</strong> <span class="k">AnonymousLinkCreated</span>. The 30-day limit had never touched a single share.</li>
+  <li>About <strong>300</strong> <span class="k">SecureLinkCreated</span> and about <strong>900</strong> <span class="k">AddedToSecureLink</span>. People were added to <em>existing</em> links three times as often as new links were made. Remember this; it's the whole design.</li>
+  <li>Every link update was a permission change. None set an expiry date.</li>
+</ul>
+
+<p>We also chased one red herring. About 4,800 files had been recycled in those 90 days, which looked like a cause. Matching shared files against deletions showed only 5 of 245 shared files deleted, all 45+ days after sharing. That was normal housekeeping. Whatever the reviewers had run into, it wasn't a tenant expiry. The real request was simpler and still valid: <em>make access end on a known date, automatically</em>.</p>
+
+<h2 class="head"><span class="num">02</span>What Microsoft 365 can and can't expire</h2>
+<p class="sub">There is an admin expiry for Anyone links. There is none for Specific people links. The nearest thing expires the wrong object.</p>
+
+<table class="cmp">
+  <tr><th>Option</th><th>Why not (or why yes)</th></tr>
+  <tr><td>Raise the tenant link expiry to 55</td><td>Only affects <strong>Anyone</strong> links, which this team never used. The client also wanted Anyone kept at 30.</td></tr>
+  <tr><td>Sharer types a date on every link</td><td>Works, but 50+ cases a month, and one forgotten date means a reviewer with access forever</td></tr>
+  <tr><td>Site guest expiration</td><td>Expires the <strong>guest</strong>, not the share. A reviewer on three cases loses all three at once, on a clock that started at first access. Not retroactive; every extension is a manual owner step.</td></tr>
+  <tr><td>Azure runbook + app registration</td><td>Viable, but certificates, admin consent and app-only retesting of every SharePoint call. Kept for later.</td></tr>
+  <tr><td><strong>Daily Power Automate flow, per person</strong></td><td><span class="rk rk-routine">Chosen</span> Standard connectors only, matches the ask exactly, every removal logged</td></tr>
+</table>
+
+<div class="analogy"><p class="tag">Mental model</p><p>A library where each visitor's card stops working 55 days after the librarian handed it over. The librarian never has to remember. A helper walks round every morning at six, checks every card, takes back the ones that are too old, and leaves a note for the office saying whose cards were taken back.</p></div>
+
+<h2 class="head"><span class="num">03</span>Three designs, one survivor</h2>
+<p class="sub">Each version was killed by something real SharePoint did in testing.</p>
+
+<ol>
+  <li><strong>One clock per case folder.</strong> Use the folder's created date. Dead quickly: a folder is created days before it's shared, and people often share a single file, not the folder.</li>
+  <li><strong>One clock per link.</strong> Read each link's <span class="k">Created</span> date, revoke links older than 55 days. Simple, and wrong. When you share a file with a second reviewer, SharePoint usually <em>adds them to the existing link</em>. The second reviewer inherits the first reviewer's date and loses access early. That's the 900 <span class="k">AddedToSecureLink</span> events from section 01.</li>
+  <li><strong>One clock per person.</strong> Each link carries an <span class="k">Invitations</span> list with every member's own <span class="k">invitedOn</span>. Remove only the people past 55 days; revoke the whole link only when everyone on it has expired.</li>
+</ol>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="One sharing link on a file has two members. Reviewer A was invited on August 1 and reviewer B on September 10. On day 55 for reviewer A, a per-link design would revoke the whole link and cut off reviewer B early. The per-person design removes only reviewer A from the link and B keeps access until their own day 55.">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#7C8DB3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <text class="lab" x="24" y="28">ONE LINK, TWO PEOPLE, TWO DATES</text>
+
+  <rect x="24" y="48" width="210" height="120" rx="10" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h" x="40" y="72">review-package.pdf</text>
+  <text class="s" x="40" y="94">one Specific-people link</text>
+  <text class="m" x="40" y="122">A  invitedOn Aug 1</text>
+  <text class="m" x="40" y="142">B  invitedOn Sep 10</text>
+  <text class="s" x="40" y="160">(B was added to A's link)</text>
+
+  <line x1="234" y1="90" x2="300" y2="74" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a1)"/>
+  <line x1="234" y1="130" x2="300" y2="168" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a1)"/>
+
+  <rect x="302" y="44" width="394" height="62" rx="10" fill="#26131A" stroke="#F76F72"/>
+  <text class="h" x="318" y="68">Per-link: link Created = Aug 1</text>
+  <text class="s" x="318" y="90">Sep 25 → revoke the link → <tspan class="r">B cut off 40 days early</tspan></text>
+
+  <rect x="302" y="132" width="394" height="78" rx="10" fill="#0C2417" stroke="#6FD08C" stroke-width="1.3"/>
+  <text class="h" x="318" y="156">Per-person: read each invitedOn</text>
+  <text class="s" x="318" y="178">Sep 25 → remove <tspan class="a">A</tspan> from the link only</text>
+  <text class="s" x="318" y="198">Nov 4 → B expired too → revoke the whole link</text>
+
+  <text class="m g" x="360" y="246" text-anchor="middle">Expiry belongs to the person, not to the link.</text>
+</svg>
+</div>
+<figcaption><b>Why the obvious design fails.</b> SharePoint quietly reuses links when you add people, so a link's created date says nothing about when the second, third or fifth reviewer was given access.</figcaption>
+</figure>
+
+<p>And then there's the share that has <em>no</em> date at all. When the sharer types an email and clicks <strong>Send</strong> instead of <strong>Copy link</strong>, SharePoint often grants a direct permission on the item rather than a link. <span class="k">GetSharingInformation</span> lists that person under <span class="k">principals</span>, with no invite date anywhere. The only way to age it is to remember when you first saw it, so the flow keeps a small tracker list: item ID, person ID, first seen, last seen.</p>
+
+<h2 class="head"><span class="num">04</span>How the flow works</h2>
+<p class="sub">One scheduled flow, five SharePoint REST calls, one report. Nothing for the sharer to do.</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Daily at 6 AM the flow pages through the whole library, keeps only items with unique permissions, reads sharing information for each, then takes two branches: for links it removes expired people or revokes the whole link; for direct Send shares it records first-seen dates in a tracker list and removes them after N days. Every change is logged and emailed as one report from a shared mailbox.">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#7C8DB3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <text class="lab" x="24" y="28">DAILY 06:00 · RUNS AS A SERVICE ACCOUNT</text>
+
+  <rect x="24" y="46" width="140" height="64" rx="9" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h" x="38" y="70">Page library</text>
+  <text class="s" x="38" y="90">5,000 at a time</text>
+  <line x1="164" y1="78" x2="186" y2="78" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+
+  <rect x="188" y="46" width="148" height="64" rx="9" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h" x="202" y="70">Shared only</text>
+  <text class="s" x="202" y="90">unique permissions</text>
+  <line x1="336" y1="78" x2="358" y2="78" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+
+  <rect x="360" y="46" width="170" height="64" rx="9" fill="#0A2733" stroke="#5AC8DA"/>
+  <text class="h" x="374" y="70">Sharing info</text>
+  <text class="m c" x="374" y="90">POST GetSharingInfo…</text>
+
+  <line x1="445" y1="110" x2="300" y2="150" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+  <line x1="445" y1="110" x2="560" y2="150" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+
+  <rect x="150" y="152" width="290" height="80" rx="9" fill="#241F0C" stroke="#F2D45C" stroke-width="1.2"/>
+  <text class="h" x="166" y="176">Copy-link shares</text>
+  <text class="s" x="166" y="196">each person's invitedOn &lt; cutoff?</text>
+  <text class="m a" x="166" y="218">remove person · or revoke link</text>
+
+  <rect x="456" y="152" width="240" height="80" rx="9" fill="#1A1640" stroke="#b79bff" stroke-width="1.2"/>
+  <text class="h" x="472" y="176">Send (direct) shares</text>
+  <text class="s" x="472" y="196">first seen in tracker list</text>
+  <text class="m v" x="472" y="218">delete role assignment</text>
+
+  <line x1="295" y1="232" x2="360" y2="254" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+  <line x1="576" y1="232" x2="520" y2="254" stroke="#7C8DB3" stroke-width="1.3" marker-end="url(#a2)"/>
+  <rect x="300" y="256" width="280" height="34" rx="9" fill="#0C2417" stroke="#6FD08C" stroke-width="1.3"/>
+  <text class="m g" x="440" y="278" text-anchor="middle">RunLog → one HTML report (only if changes)</text>
+</svg>
+</div>
+<figcaption><b>Two branches for two kinds of share.</b> Links carry their own per-person dates; direct grants don't, so the flow writes its own. Site members are never touched; only external principals are evaluated.</figcaption>
+</figure>
+
+<p>Everything that touches sharing goes through <strong>Send an HTTP request to SharePoint</strong>, a standard connector action that calls the REST API as the connection's account. The normal SharePoint actions can't read link members or remove one person from a link.</p>
+
+<table class="cmp">
+  <tr><th>Purpose</th><th>Call</th><th>Needs</th></tr>
+  <tr><td>List items + whether each has its own permissions</td><td><span class="k long">GET …/items?$select=Id,FileRef,HasUniqueRoleAssignments&amp;$top=5000</span></td><td>Read</td></tr>
+  <tr><td>Links, members, invite dates, direct grants</td><td><span class="k long">POST …/items(id)/GetSharingInformation?$expand=permissionsInformation</span></td><td>Site Owner</td></tr>
+  <tr><td>Revoke a whole link</td><td><span class="k long">POST …/items(id)/UnshareLink</span></td><td>Site Owner</td></tr>
+  <tr><td>Remove one person from a link</td><td><span class="k long">POST _api/web/sitegroups/getbyname('SharingLinks.&lt;item&gt;.Flexible.&lt;shareId&gt;')/users/removebyid(id)</span></td><td><strong>Site Collection Admin</strong></td></tr>
+  <tr><td>Remove a direct (Send) grant</td><td><span class="k long">POST …/roleassignments/getbyprincipalid(id)</span> + <span class="k">X-HTTP-Method: DELETE</span></td><td>Site Owner</td></tr>
+</table>
+
+<p>The fourth call is the one to understand. Behind every Specific-people link, SharePoint keeps a hidden group named <span class="k">SharingLinks.&lt;item id&gt;.Flexible.&lt;link id&gt;</span>. The people on the link are that group's members. Remove a member and that person is off the link while it keeps working for everyone else.</p>
+
+<p>Three details that each cost a test cycle:</p>
+<ul>
+  <li><span class="k">GetSharingInformation</span> only works as <strong>POST</strong>, and needs <span class="k">Accept</span> <em>and</em> <span class="k">Content-Type: application/json;odata=nometadata</span>. Without them SharePoint answers in Atom XML and every filter downstream silently reads nothing.</li>
+  <li>Every shared item comes back with <strong>two placeholder links</strong>: ShareId all zeros, inactive, no date. Filter them out (<span class="k">IsActive</span> and non-zero <span class="k">ShareId</span>) or the flow tries to revoke ghosts.</li>
+  <li>A Uri with two leading spaces fails with <strong>401 Unauthorized</strong>, not a parse error. The error body shows <span class="k">%20%20_api</span> if you look for it.</li>
+</ul>
+
+<p>The report is built from a <span class="k">RunLog</span> array of small records (action, file, folder, person, shared date, days, who still has access), turned into table rows with a <strong>Select</strong> and wrapped in one <strong>Compose</strong> of table-based, inline-styled HTML, because Outlook desktop ignores most modern CSS. It's sent from a shared mailbox the service account has Send As on, so it reads "Expert Access Alerts" rather than a service account name, and only on days something changed. A <span class="k">DryRun</span> switch makes the flow do everything except remove, with "would revoke" wording and a yellow banner, which is how every test ran.</p>
+
+<div class="takeaway">
+  <p class="tag">The one-line model</p>
+  <p>When the platform has no expiry for a kind of access, don't expire the object that's easiest to see (the folder, the link, the guest). Expire the thing the requirement is actually about, here each person's grant, and read that date from where SharePoint really stores it.</p>
+</div>
+
+<h2 class="head"><span class="num">05</span>The 403 that testing hides</h2>
+<p class="sub">Everything passed under my account. Under the service account, per-person removal failed.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>Site Owner can't edit the hidden SharingLinks groups</h3><p>The flow was built and tested under the engineer account that created the site, and site creators are <strong>Site Collection Admins</strong> automatically. Moved to a dedicated service account with Site Owner (Full Control), the "remove one person from a link" call returned <strong>403 Access denied</strong>. Revoking a whole link and deleting direct grants still worked, so only the partial case broke. The fix is <span class="k">Set-SPOUser -IsSiteCollectionAdmin $true</span> for the service account <em>on that one site only</em>. If you test as the site creator, you'll never see this until production.</p></div>
+</div>
+
+<p>The service account itself is deliberately boring: no directory roles, password in the vault and set not to expire (a password change breaks every connection), MFA registered, one licence with only Exchange, SharePoint and Power Automate switched on, Site Collection Admin on one site, Send As on one mailbox, and its own mail forwarded to the alerts DL because flow-failure notices go to owners. One gotcha: assigning the licence seconds after creating the account left the Exchange plan in <strong>Error</strong> for a while, because Exchange couldn't see the user yet. Wait a minute or two before licensing.</p>
+
+<h2 class="head"><span class="num">06</span>Day one: the 5,000-item wall</h2>
+<p class="sub">The first scheduled run succeeded. It had also only looked at two-thirds of the library.</p>
+
+<p>The morning after go-live the flow ran green. Its first REST call had returned exactly <strong>5,000</strong> items, all from a single case, with an <span class="k">odata.nextLink</span> at the top of the reply. The library held <strong>7,528</strong>. The team's first case included imaging discs: a DICOM viewer is thousands of small files, and one case had pushed the library past 5,000 within hours.</p>
+
+<p>SharePoint returns at most 5,000 items per REST request and hands you the address of the next page. A flow that makes one call never sees the rest. When we fixed it, page two held all four of the team's first real reviewer shares. Without the fix, none of them would ever have expired, and nothing would have looked wrong.</p>
+
+<p>The fix is a <strong>Do until</strong> loop that follows <span class="k">odata.nextLink</span> until it's empty, filtering each page down to shared items as it goes so the working set stays small:</p>
+
+<pre><code>NextUrl     = _api/web/lists/getbytitle('Documents')/items?$select=Id,FileRef,FileDirRef,HasUniqueRoleAssignments&amp;$top=5000
+Do until    = empty(variables('NextUrl'))
+  Get page  = GET @{variables('NextUrl')}
+  Merged    = union(variables('SharedItems'), body('Page_shared'))
+  NextUrl   = if(empty(body('Get_page')?['odata.nextLink']), '',
+                substring(body('Get_page')?['odata.nextLink'],
+                          indexOf(body('Get_page')?['odata.nextLink'], '_api/')))</code></pre>
+
+<p>Two small things in there: <strong>Set variable can't reference itself</strong>, hence the <span class="k">Merged</span> Compose, and the next-page address comes back absolute, so it's cut back to <span class="k">_api/…</span> to match the relative form the SharePoint action expects. Verified on the next run: two pages, 5,000 + 2,528, matching the item count in Site contents, and all four shares found.</p>
+
+<div class="mr">
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">A green run means the flow checked everything.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">A capped REST reply is a success. Compare what the flow read against the library count in Site contents after the first real day of use, not just after testing on an empty site.</p></div></div></div>
+  </div>
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">Site Owner is enough to manage sharing on a site.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">Owners can revoke whole links, but removing one person from a link edits a system-owned group and needs <strong>Site Collection Admin</strong>.</p></div></div></div>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">07</span>Testing without waiting 55 days</h2>
+<p class="sub">You can't backdate a sharing link. You can move the line instead.</p>
+
+<table class="cmp">
+  <tr><th>Technique</th><th>Set the cutoff to</th><th>Use it for</th></tr>
+  <tr><td>Short cutoff</td><td><span class="k">addMinutes(utcNow(), -2)</span></td><td>Anything shared more than two minutes ago counts as expired</td></tr>
+  <tr><td>Pinned cutoff</td><td>A fixed UTC time between two shares</td><td>Per-person tests: the earlier reviewer expires, the later one doesn't, however long you take</td></tr>
+  <tr><td>Backdate the tracker</td><td>Leave it at N days; edit FirstSeen</td><td>Send shares at the real production setting</td></tr>
+  <tr><td>Dry run</td><td><span class="k">DryRun = true</span></td><td>Everything except the removal, with "would" wording</td></tr>
+</table>
+
+<p>Every path was run dry then live: link one and two folders deep, two reviewers on one link with both expired and with one expired, a direct Send share, placeholder links, and site members checked after every removal. Remember the timezone: SharePoint stores UTC, so a pinned cutoff typed in local time is hours off.</p>
+
+<h2 class="head"><span class="num">08</span>The setup scripts</h2>
+<p class="sub">The flow is built by hand in the designer. Everything around it is scripted, interactive and reusable.</p>
+
+<table class="cmp">
+  <tr><th>File</th><th>What it does</th><th>Changes anything?</th></tr>
+  <tr><td><strong>01-Get-SharingBaseline.ps1</strong></td><td>Tenant sharing settings + audit-log summary: Anyone vs Specific-people links, people added to existing links, manual expiry dates</td><td>No</td></tr>
+  <tr><td><strong>02-New-AutomationServiceAccount.ps1</strong></td><td>Role-less account, password shown once, licence with only the plans you keep, waits for Exchange first</td><td><span class="rk rk-high">Yes</span></td></tr>
+  <tr><td><strong>03-Set-ShareExpirySite.ps1</strong></td><td>Anyone links off on the site, Specific people default, guest expiry override off, service account Owner + Site Collection Admin</td><td><span class="rk rk-high">Yes</span></td></tr>
+  <tr><td><strong>04-New-AlertSenderMailbox.ps1</strong></td><td>Hidden shared sender mailbox, Send As, service account mail forwarded to the alerts DL</td><td><span class="rk rk-care">Yes</span></td></tr>
+</table>
+
+<p>01 and 03 need Windows PowerShell 5.1: the SharePoint Online cmdlets aren't recognised in PowerShell 7. The download also includes the report's HTML template.</p>
+
+<a class="dl" href="/assets/downloads/sharepoint-share-expiry-toolkit.zip" download>&#8681;&nbsp; Download the toolkit &mdash; 4 scripts + email template (.zip)</a>
+
+<h2 class="head"><span class="num">09</span>Limits worth stating up front</h2>
+<ul>
+  <li><strong>One site per flow.</strong> Keep external sharing on a dedicated site. A whole OneDrive estate needs a different design.</li>
+  <li><strong>Send shares can be up to a day late</strong>, because their clock starts on the first morning the flow sees them.</li>
+  <li><strong>More time for a reviewer means sharing again.</strong> That starts a fresh period; nothing to configure.</li>
+  <li><strong>The removal is access, not data.</strong> Anything a reviewer downloaded stays downloaded. If that matters, it's a labelling and DLP question, not an expiry one.</li>
+</ul>
+
+<div class="sources"><h2>Sources &amp; further reading</h2><ul>
+  <li><a href="https://learn.microsoft.com/en-us/sharepoint/turn-external-sharing-on-or-off">Manage sharing settings for SharePoint and OneDrive</a><span>Link expiration is an Anyone-link setting; guest access expiration is separate</span></li>
+</ul></div>
+
+</div>
+</article>
+
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Ram Mudigina · Ground Truth</span>
+    <span><a href="/">Home</a> · <a href="/about.html">About</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+  </div>
+</footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>

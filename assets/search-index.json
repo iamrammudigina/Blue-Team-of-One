@@ -1,5 +1,13 @@
 [
 {
+"url": "/posts/sharepoint-specific-people-link-expiry.html",
+"title": "Making \"Specific people\" links expire, per person",
+"excerpt": "Microsoft 365 can expire Anyone links but has no admin expiry for Specific people links. A daily Power Automate flow removes each external reviewer's access N days after they were shared, ageing people rather than links, plus the 403 and 5,000-item traps that only appear in production.",
+"vertical": "Cloud Security",
+"section": "Purview & governance",
+"text": "External sharing link expiry for SharePoint Specific people links. Tenant setting RequireAnonymousLinksExpireInDays only applies to Anyone links; there is no admin expiry for Specific people links; guest expiration expires the guest across every file on the site from first access and is not retroactive. Audit log SharePointSharingOperation showed zero AnonymousLinkCreated and three times more AddedToSecureLink than SecureLinkCreated: SharePoint reuses links, so a link Created date is not each person's share date. Design ages each person using Invitations invitedOn from GetSharingInformation (POST with Accept and Content-Type application/json;odata=nometadata), removes only expired people from the hidden SharingLinks Flexible group, revokes the whole link with UnshareLink when everyone expired, and handles Send direct grants with a tracker list of first-seen dates and roleassignments getbyprincipalid with X-HTTP-Method DELETE. Placeholder links with all-zero ShareId must be filtered. Removing one person from a link needs Site Collection Admin, Site Owner gets 403 Access denied. SharePoint REST returns 5,000 items per request; follow odata.nextLink in a Do until loop. Dedicated service account, shared sender mailbox with Send As, HTML report from a Compose, DryRun switch, short and pinned cutoffs for testing. PowerShell toolkit: sharing baseline, service account, site setup, sender mailbox."
+},
+{
 "url": "/posts/sensitive-recording-transcription-sharepoint.html",
 "title": "Transcribing sensitive recordings without letting them out",
 "excerpt": "Word Transcribe vs Stream on SharePoint for confidential interview recordings, a site locked to one group and work devices, an encrypting label that keeps Copilot out, the Defender for Cloud Apps detour, what each control actually blocked in testing, and the go-live surprises (audio files, unlabelled videos, transcripts other systems can't open).",
