@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>(function(){try{var t=localStorage.getItem('gt-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<script defer src="/assets/theme.js?v=1"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transcribing sensitive recordings in Microsoft 365 — Ground Truth</title>
+<meta name="description" content="An investigations team needed transcripts of confidential interview recordings without the files leaving a controlled place. Word Transcribe vs Stream on SharePoint, a site locked to one group and work devices, an encrypting label that keeps Copilot out, the Defender for Cloud Apps detour, what each control actually blocks in testing, and the go-live surprises (audio files, unlabelled videos, transcripts other systems can't open).">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;680;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=33">
+<style>
+  figure.diagram{margin:30px 0; padding:0}
+  figure.diagram .scroll{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  figure.diagram svg{display:block; width:100%; min-width:640px; height:auto;
+    background:#0A1E42; border:1px solid #1E3E70; border-radius:10px}
+  figure.diagram figcaption{margin-top:10px; font-family:var(--mono); font-size:12.5px; color:var(--ink-3); line-height:1.5}
+  figure.diagram figcaption b{color:var(--ink-2)}
+  .dg .lab{font-family:var(--mono); font-size:10.5px; letter-spacing:.08em; fill:#7C8DB3}
+  .dg .h{font-family:var(--mono); font-size:13px; font-weight:700; fill:#EAEEF6}
+  .dg .b{font-family:var(--sans); font-size:12.5px; fill:#B7C4DD}
+  .dg .s{font-family:var(--sans); font-size:11.5px; fill:#7C8DB3}
+  .dg .m{font-family:var(--mono); font-size:11px; fill:#B7C4DD}
+  .dg .g{fill:#6FD08C} .dg .a{fill:#F2D45C} .dg .c{fill:#5AC8DA} .dg .v{fill:#b79bff} .dg .r{fill:#F76F72} .dg .x{fill:#7C8DB3}
+  pre .cr{color:#f0868a}
+  .tldr{border:1px solid var(--line); border-radius:8px; background:var(--bg-2); padding:6px 18px; margin:26px 0}
+  .tldr li{margin:10px 0; color:var(--ink-2)}
+  .tldr b{color:var(--ink)}
+  ul.scopebox{list-style:none; border:1px solid var(--line); border-radius:10px; background:var(--bg-2); padding:6px 20px; margin:26px 0}
+  ul.scopebox li{margin:13px 0; color:var(--ink-2); font-size:15.5px; line-height:1.55; padding-left:26px; position:relative}
+  ul.scopebox li b{color:var(--ink)}
+  ul.scopebox li .mk{position:absolute; left:0; top:0; font-weight:700}
+  ul.scopebox li .yes{color:var(--verified)} ul.scopebox li .no{color:var(--severity)} ul.scopebox li .arw{color:var(--accent)}
+  @media (max-width:640px){ .mr{grid-template-columns:1fr}
+    .cmp{font-size:12.5px} .cmp th,.cmp td{padding:8px 9px; overflow-wrap:anywhere}
+    .k.long{white-space:normal; overflow-wrap:anywhere} }
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Ground <b>Truth</b></span>
+      <span class="tag">field notes · defensive security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/" aria-current="page">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/cloud/">Cloud Security</a><span class="sep">›</span><a href="/cloud/purview-governance.html">Purview &amp; governance</a></p>
+    <p class="eyebrow"><span class="dot"></span>Deep dive + field case · Stream, SharePoint, Purview, Entra CA</p>
+    <h1>Transcribing sensitive recordings <em>without letting them out</em></h1>
+    <p class="lede">An investigations team asked a simple question: can we use Word's Transcribe on our interview recordings? The honest answer took three weeks of testing, because the real requirement was "transcripts, and the recordings never leave a controlled place." Here's the whole build — what each Microsoft 365 control actually blocked when I tested it, what none of them can block, and the surprises on the first real upload.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>October 23, 2026</span>
+      <span>~24 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>The request arrived as a yes/no question about a feature. Those are the dangerous ones, because the feature usually works — Word will happily transcribe an MP4 — and the risk sits in where the file goes, who else can see it, and what happens to the text afterwards. Investigative interviews are about as confidential as content gets: statutory confidentiality, public-records exposure, and the possibility that a transcript ends up quoted in a formal proceeding.</p>
+
+<p>So the work split into three questions, in this order. <strong>Which transcription engine</strong> keeps the recording somewhere the organisation controls? <strong>Which controls</strong> keep it there — and what does each one actually stop, as opposed to what the docs imply? And <strong>what breaks</strong> when real people start using it?</p>
+
+<div class="tldr">
+<ul>
+  <li><b>Engine:</b> Stream on SharePoint, not Word Transcribe. Word saves the audio to the user's personal OneDrive and caps at 300 minutes a month; Stream keeps the transcript with the video, under the library's permissions and retention.</li>
+  <li><b>Controls:</b> one site, one mail-enabled security group, owner-only sharing, Restricted Content Discovery, a Conditional Access "app enforced restrictions" policy plus a site-level <span class="k">BlockAccess</span>, and an encrypting sensitivity label with no copy, print, export — or Copilot.</li>
+  <li><b>What testing showed:</b> browser-only access still let a personal device edit transcripts, trim video and copy text. Microsoft has no per-device read-only video player. Blocking personal devices outright was the only site-scoped fix.</li>
+  <li><b>Detour:</b> Defender for Cloud Apps blocked copy, paste and print perfectly — and can't be limited to one site, so it wasn't adopted.</li>
+  <li><b>Go-live:</b> the first file was audio-only (no transcript), the second showed "No label" (MP4s are never auto-labelled), and the transcripts needed to go into another system that can't open labelled files.</li>
+</ul>
+</div>
+
+<h2 class="head"><span class="num">01</span>Word Transcribe or Stream? Read the storage line first</h2>
+<p class="sub">Both transcribe. The difference that matters for confidential content is where the audio lands and who controls it afterwards.</p>
+
+<p>I compared the two strictly from Microsoft's documentation before building anything, and kept anything I couldn't source out of the client-facing answer.</p>
+
+<table class="cmp">
+  <tr><th></th><th>Word Transcribe</th><th>Stream on SharePoint</th></tr>
+  <tr><td><strong>Accepts</strong></td><td>.wav, .mp4, .m4a, .mp3 — upload, or record in Word</td><td>Video formats only (the full list is in section 10)</td></tr>
+  <tr><td><strong>Where the audio lands</strong></td><td>The user's OneDrive, <em>Transcribed Files</em> folder</td><td>The library you uploaded to</td></tr>
+  <tr><td><strong>Who can see it</strong></td><td>That user; sharing the audio is a separate, per-person step</td><td>Transcript is stored with the video and inherits its permissions and retention policy</td></tr>
+  <tr><td><strong>Limits</strong></td><td>300 uploaded minutes / user / month; 30,000 with a Microsoft 365 Copilot licence</td><td>Automatic under 1 GB and 4 h; manual <em>Generate</em> under 4 GB and 4 h. No monthly cap documented — either way</td></tr>
+  <tr><td><strong>Speakers</strong></td><td>Separated (Speaker 1, Speaker 2; rename them)</td><td>Not separated in my testing</td></tr>
+  <tr><td><strong>Processing</strong></td><td>Audio sent to Microsoft; not retained by the service after transcription</td><td>Server-side; Microsoft documents "some delay" that depends on length — no SLA</td></tr>
+  <tr><td><strong>Desktop prerequisite</strong></td><td>"Experiences that analyze your content" privacy setting on</td><td>Browser</td></tr>
+  <tr><td><strong>Government clouds</strong></td><td>GCC: Word for the web only</td><td>Check per cloud</td></tr>
+  <tr><td><strong>Export</strong></td><td>Insert into the Word document</td><td>.docx and .vtt from the transcript pane</td></tr>
+</table>
+
+<p>The storage row decided it. A department's confidential recordings scattered across individual OneDrives is a records and access problem before it's a security one: nothing central to apply retention to, nothing central to audit, and access that walks out the door with each person.</p>
+
+<div class="mr">
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">Word Transcribe on the desktop runs under consumer terms because it's an "optional connected experience".</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">I said this in my first draft and had to correct it. Microsoft lists Transcribe under <strong>connected experiences that analyze your content</strong> — not the "optional connected experiences" category that falls under the Services Agreement. The real arguments against it are the OneDrive storage and the per-user cap.</p></div></div></div>
+  </div>
+</div>
+
+<p>Two quick checks belong at the start of any job like this. First, <strong>which cloud is the tenant in?</strong> Feature availability differs in GCC, and you can tell without admin rights:</p>
+<pre class="code"><span class="cm"># browser, no sign-in needed</span>
+https://login.microsoftonline.com/<span class="k">&lt;domain&gt;</span>/.well-known/openid-configuration
+<span class="cm"># tenant_region_sub_scope = "GCC" -&gt; GCC · missing -&gt; commercial · login.microsoftonline.us -&gt; GCC High</span>
+<span class="cm"># also visible in Licenses: E3/E5 = commercial, G3/G5 = government</span></pre>
+<p>Second, <strong>is transcription already switched on everywhere?</strong> It almost certainly is — and that's worth telling the client on its own:</p>
+<pre class="code">Connect-SPOService -Url "https://<span class="k">&lt;tenant&gt;</span>-admin.sharepoint.com"   <span class="cm"># Windows PowerShell 5.1, not 7</span>
+Get-SPOTenant | Select MediaTranscription, MediaTranscriptionAutomaticFeatures
+<span class="cm"># Enabled  Enabled   &lt;- Microsoft's default</span>
+Get-SPOSite -Identity <span class="k">&lt;site-url&gt;</span> -Detailed | Select *Transcri*
+<span class="cm"># MediaTranscription : Enabled   &lt;- a per-site switch exists too</span></pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>Every video in the tenant is already being transcribed</h3><p>Automatic transcription is on by default, tenant-wide. Any video anyone has uploaded to SharePoint or OneDrive is being transcribed and its words made searchable to whoever can see the video. That's not a flaw in the new site — it's a pre-existing condition the client should know about, and it can be switched per site if they want it off elsewhere.</p></div>
+</div>
+
+<h2 class="head"><span class="num">02</span>The pilot: what Stream actually does</h2>
+<p class="sub">A throwaway site and public sample videos. Nothing confidential touches anything until the behaviour is known.</p>
+
+<p>Two uploads told me most of what I needed. The first I opened and transcribed by hand; the second I uploaded and deliberately never opened.</p>
+
+<table class="cmp">
+  <tr><th>Test</th><th>What happened</th></tr>
+  <tr><td><strong>Manual Generate</strong> (Video settings › Transcript and captions)</td><td>Done in about 12 minutes on a ~1.5-minute video. The panel says <em>"The generation is taking more time than expected"</em> — normal; it keeps running if you close the tab</td></tr>
+  <tr><td><strong>Automatic, never opened</strong></td><td>Transcript present when I checked ~45 minutes later, with 0 views. "Generated by Microsoft"</td></tr>
+  <tr><td><strong>Accuracy</strong></td><td>High on clear audio — names and product terms right. Still needs a human check before anyone relies on it</td></tr>
+  <tr><td><strong>Speakers</strong></td><td>Not separated. One continuous stream; interviewer and interviewee unlabelled</td></tr>
+  <tr><td><strong>Timestamps</strong></td><td>Every line; click to jump the video there. Editors can edit lines in the pane</td></tr>
+  <tr><td><strong>Export</strong></td><td>.docx and .vtt</td></tr>
+  <tr><td><strong>Upload</strong></td><td>Accepts your own WebVTT file (corrected, professional, or a translation — one per language). Download / Replace / Delete live under the "…" next to the language</td></tr>
+</table>
+
+<p>Microsoft doesn't publish a processing time, so <strong>measure it yourself and say so</strong> when you report it. The only reliable clock I found is the file's <em>Version history</em> — the transcript is saved as a new version of the video — or the library's Modified column. The unified audit log was no help for timing: events took over an hour to become searchable, timestamps are UTC, and what did appear was provisioning and list views, not a "transcript added" event.</p>
+
+<pre class="code"><span class="cm"># the wide, loose search that eventually returned something</span>
+Search-UnifiedAuditLog -StartDate (Get-Date).AddDays(-1) -EndDate (Get-Date).AddDays(1) `
+  -FreeText "<span class="k">&lt;site-name&gt;</span>" -ResultSize 200 |
+  Select CreationDate, UserIds, Operations | Sort CreationDate
+<span class="cm"># exact -ObjectIds matches on file URLs returned nothing (spaces, encoding, ingestion lag)</span></pre>
+
+<h2 class="head"><span class="num">03</span>Six layers, each blocking one thing</h2>
+<p class="sub">No single control does the job. The design only makes sense once you see which layer stops what.</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Six control layers on the transcription site. Who: one security group in site Members. Sharing: external off, owners only, access requests off. Discovery: Restricted Content Discovery hides the site from org-wide search and Copilot results. Device: a Conditional Access policy passes device state and the site's BlockAccess setting refuses personal devices. File: an encrypting label with no copy, print or export travels with documents and keeps Copilot out. Retention: no auto-delete policies, so files stay until someone deletes them.">
+  <text class="lab" x="24" y="28">LAYER → SCOPE → WHAT IT STOPS</text>
+
+  <rect x="24" y="44" width="672" height="44" rx="8" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h c" x="40" y="70">WHO</text>
+  <text class="b" x="150" y="64">one security group in Members (edit) · business owner as site admin</text>
+  <text class="s" x="150" y="80">this site · stops anyone outside the group opening it</text>
+
+  <rect x="24" y="96" width="672" height="44" rx="8" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h c" x="40" y="122">SHARING</text>
+  <text class="b" x="150" y="116">external sharing off · owners-only sharing · access requests off</text>
+  <text class="s" x="150" y="132">this site · stops files being shared out or access being requested</text>
+
+  <rect x="24" y="148" width="672" height="44" rx="8" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h c" x="40" y="174">DISCOVERY</text>
+  <text class="b" x="150" y="168">Restricted Content Discovery</text>
+  <text class="s" x="150" y="184">this site · hides it from org-wide search and Copilot results (not from people who can open it)</text>
+
+  <rect x="24" y="200" width="672" height="44" rx="8" fill="#241F0C" stroke="#F2D45C" stroke-width="1.2"/>
+  <text class="h a" x="40" y="226">DEVICE</text>
+  <text class="b" x="150" y="220">CA "app enforced restrictions" (group-scoped) + site BlockAccess</text>
+  <text class="s" x="150" y="236">this site · personal devices get nothing; tenant stays AllowFullAccess</text>
+
+  <rect x="24" y="252" width="672" height="44" rx="8" fill="#0F2A1B" stroke="#6FD08C" stroke-width="1.2"/>
+  <text class="h g" x="40" y="278">FILE</text>
+  <text class="b" x="150" y="272">encrypting label · group-only rights · no EXTRACT / PRINT / EXPORT</text>
+  <text class="s" x="150" y="288">labelled files, wherever they go · stops copy, print, export, Copilot, outsiders</text>
+
+  <rect x="24" y="304" width="672" height="44" rx="8" fill="#1A1640" stroke="#b79bff"/>
+  <text class="h v" x="40" y="330">RETENTION</text>
+  <text class="b" x="150" y="324">no delete policies or retention labels (checked)</text>
+  <text class="s" x="150" y="340">tenant · nothing auto-deletes — and nothing prevents deletion either</text>
+</svg>
+</div>
+<figcaption><b>Five of six layers are scoped to one site or one group.</b> Only the label travels with the file, which is why it's the layer that still protects a document after someone downloads it.</figcaption>
+</figure>
+
+<h2 class="head"><span class="num">04</span>The build, in order</h2>
+<p class="sub">Every command here ran against a real tenant. Placeholders only; your values go in the angle brackets.</p>
+
+<h3>Site</h3>
+<pre class="code">New-SPOSite -Url "<span class="k">&lt;site-url&gt;</span>" -Owner "<span class="k">&lt;admin-upn&gt;</span>" -StorageQuota 10240 `
+  -Title "<span class="k">&lt;Site Title&gt;</span>" -Template "STS#3"     <span class="cm"># team site, no Microsoft 365 group</span>
+<span class="cm"># no output = success; provisioning takes a few minutes</span>
+
+$site = "<span class="k">&lt;site-url&gt;</span>"
+Set-SPOSite -Identity $site -SharingCapability Disabled
+Set-SPOSite -Identity $site -DisableSharingForNonOwners
+Set-SPOSite -Identity $site -RestrictContentOrgWideSearch $true   <span class="cm"># Restricted Content Discovery</span>
+Get-SPOSite -Identity $site -Detailed | Select SharingCapability, RestrictContentOrgWideSearch</pre>
+<p><span class="k">STS#3</span> means no Teams, no group mailbox, no group to sprawl. Three things surprised me here. The 10 GB quota came back as <span class="k">26214400</span> — the tenant uses pooled storage (<span class="k">StorageQuotaAllocated = 0</span>), so per-site quotas are ignored; leave it, because switching is tenant-wide. <span class="k">DisableSharingForNonOwnersStatus</span> often reads blank, so confirm in the UI (Settings › Site permissions › Change how members can share: <em>Only site owners can share</em>, and <em>Allow access requests: Off</em>). And Restricted Content Discovery needs SharePoint Advanced Management, which comes free once the tenant has a single Microsoft 365 Copilot licence assigned. The site header then shows a <strong>Restricted</strong> badge.</p>
+
+<h3>Access group — and why it has to be mail-enabled</h3>
+<pre class="code">Connect-ExchangeOnline
+New-DistributionGroup -Name "<span class="k">&lt;sg-name&gt;</span>" -Type Security -PrimarySmtpAddress "<span class="k">&lt;sg-mail&gt;</span>" `
+  -ManagedBy "<span class="k">&lt;owner-upn&gt;</span>" -Members "<span class="k">&lt;owner-upn&gt;</span>" `
+  -MemberJoinRestriction Closed -MemberDepartRestriction Closed
+Set-DistributionGroup "<span class="k">&lt;sg-name&gt;</span>" -HiddenFromAddressListsEnabled $true
+<span class="cm"># expect: Universal, SecurityEnabled · ManagedBy = owner · Closed/Closed · hidden · RequireSenderAuthenticationEnabled True</span></pre>
+<p>Label encryption grants rights to an <strong>email address</strong>. A plain Entra security group has none, so it can't appear in the label. A mail-enabled security group works for the label <em>and</em> SharePoint permissions. Two side effects: membership is managed in Exchange (EAC or <span class="k">Add-DistributionGroupMember</span>) — Entra won't let you edit it — and <span class="k">ManagedBy</span> lets the business owner approve members from Outlook.</p>
+
+<pre class="code">Connect-SPOService -Url "https://<span class="k">&lt;tenant&gt;</span>-admin.sharepoint.com"
+Set-SPOUser -Site $site -LoginName "<span class="k">&lt;owner-upn&gt;</span>" -IsSiteCollectionAdmin $true
+Get-SPOSiteGroup -Site $site | Select Title
+Add-SPOUser -Site $site -LoginName "<span class="k">&lt;sg-mail&gt;</span>" -Group "<span class="k">&lt;Site Title&gt;</span> Members"
+<span class="cm"># "user not found" = group hasn't synced to Entra yet; wait 5-15 min</span></pre>
+<p>Members (edit), not Visitors: generating a transcript manually needs edit rights. Hold on to that fact — it comes back to bite in section 05.</p>
+
+<h3>Personal devices</h3>
+<p>Check the starting state, and check the owner's laptop is actually compliant — otherwise you lock out the person you're building it for:</p>
+<pre class="code">Get-SPOTenant | Select ConditionalAccessPolicy                         <span class="cm"># must stay AllowFullAccess</span>
+Get-SPOSite -Identity $site -Detailed | Select ConditionalAccessPolicy
+
+Connect-MgGraph -Scopes "DeviceManagementManagedDevices.Read.All"
+Get-MgDeviceManagementManagedDevice -Filter "userPrincipalName eq '<span class="k">&lt;upn&gt;</span>'" |
+  Select DeviceName, ComplianceState, JoinType, ManagementAgent, OperatingSystem
+<span class="cm"># ComplianceState compliant is what counts; a blank JoinType is fine</span></pre>
+<p>Then one Conditional Access policy: users = the group only; target = <strong>Office 365 SharePoint Online</strong> (not "Office 365"); no conditions, no grant; session = <strong>Use app enforced restrictions</strong>; On. Ignore the portal nudges to target Office 365 and the warning that SharePoint "will also affect Teams, Planner…" — app-enforced restrictions only bite on sites that ask for them. Finally the site setting, covered properly in the next section.</p>
+
+<h3>Sensitivity label</h3>
+<pre class="code"><span class="cm"># tenant prerequisites (change record) — both prompt; answer Y</span>
+Set-SPOTenant -EnableAIPIntegration $true
+Set-SPOTenant -EnableSensitivityLabelForVideoFiles $true
+
+Connect-IPPSSession
+New-Label -Name "<span class="k">&lt;label-name&gt;</span>" -DisplayName "<span class="k">&lt;label-display&gt;</span>" `
+  -Tooltip "<span class="k">&lt;Dept&gt;</span> material. Restricted to authorized <span class="k">&lt;Dept&gt;</span> staff." `
+  -ContentType "File" -EncryptionEnabled $true -EncryptionProtectionType Template `
+  -EncryptionRightsDefinitions "<span class="k">&lt;sg-mail&gt;</span>:VIEW,VIEWRIGHTSDATA,DOCEDIT,EDIT,OBJMODEL" `
+  -EncryptionContentExpiredOnDateInDaysOrNever Never -EncryptionOfflineAccessDays 0
+
+Get-Label "<span class="k">&lt;label-name&gt;</span>" -IncludeDetailedLabelActions |
+  Select EncryptionEnabled, EncryptionProtectionType, EncryptionRightsDefinitions,
+         EncryptionContentExpiredOnDateInDaysOrNever, EncryptionOfflineAccessDays</pre>
+<p>Check for existing labels first (<span class="k">Get-Label</span>, <span class="k">Get-LabelPolicy</span>). With none, turning on <span class="k">EnableAIPIntegration</span> changes nothing users can see — that was the argument for treating it as a prerequisite of the approved change rather than a new approval. <span class="k">New-Label</span> may print <em>"WARNING: Encountered WebException while getting UDP policy"</em>; it's harmless. And without <span class="k">-IncludeDetailedLabelActions</span> every encryption field reads blank, which looks exactly like the settings didn't save.</p>
+
+<table class="cmp">
+  <tr><th>Setting</th><th>Value</th><th>Effect</th></tr>
+  <tr><td>Rights</td><td>VIEW, VIEWRIGHTSDATA, DOCEDIT, EDIT, OBJMODEL</td><td>Group can open, view rights, save, edit, run macros</td></tr>
+  <tr><td>No EXTRACT</td><td>—</td><td>No copying text out. <strong>Copilot needs VIEW and EXTRACT</strong>, so it can't return the content</td></tr>
+  <tr><td>No PRINT, no EXPORT</td><td>—</td><td>No printing; no "Save As" an unprotected copy, no removing protection</td></tr>
+  <tr><td>Expiry</td><td>Never</td><td>Required — SharePoint can't process files whose label has an access expiry</td></tr>
+  <tr><td>Offline access</td><td>0 days</td><td>A downloaded copy opens only while signed in and online</td></tr>
+  <tr><td>Type</td><td>Template ("Assign permissions now")</td><td>Also required for encrypted MP4 support</td></tr>
+</table>
+
+<pre class="code">New-LabelPolicy -Name "<span class="k">&lt;policy&gt;</span>" -Labels "<span class="k">&lt;label-name&gt;</span>" -ExchangeLocation "<span class="k">&lt;sg-mail&gt;</span>","<span class="k">&lt;admin-upn&gt;</span>"
+<span class="cr"># The specified recipient "&lt;sg-mail&gt;" couldn't be found.</span>
+
+<span class="cm"># the group existed (Get-Recipient showed MailUniversalSecurityGroup) — the compliance</span>
+<span class="cm"># directory just hadn't caught up, 90+ minutes later, by address OR object ID. Workaround:</span>
+New-LabelPolicy -Name "<span class="k">&lt;policy&gt;</span>" -Labels "<span class="k">&lt;label-name&gt;</span>" -ExchangeLocation "<span class="k">&lt;admin-upn&gt;</span>"
+Set-LabelPolicy "<span class="k">&lt;policy&gt;</span>" -AddExchangeLocation "<span class="k">&lt;sg-mail&gt;</span>"   <span class="cm"># accepted</span>
+Get-LabelPolicy "<span class="k">&lt;policy&gt;</span>" | Select Enabled, Mode, DistributionStatus, ExchangeLocation, Settings</pre>
+<p>Expect <span class="k">Enforce</span>, both locations, an empty <span class="k">Settings</span>, and <span class="k">DistributionStatus Pending</span> for about an hour (up to 24) before <span class="k">Success</span>. The label actually appeared in SharePoint's menu <em>before</em> the status flipped. <em>"WARNING: Force Validate not set"</em> is informational.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>Library default label, never a policy default label</h3><p>A policy-level default would stamp this label on <em>every</em> new document those users create anywhere — memos, emails, their own work — and encrypt it to one group with no copy or print. The library default (Documents › Library settings › Default sensitivity labels) labels only what's saved in that library. Add the <em>Sensitivity</em> column to the view while you're there.</p></div>
+</div>
+
+<p>If you ever open a PowerShell-built label in the Purview portal to check it, the mapping is: <em>Control access</em> = encryption on; <em>Assign permissions now</em> = Template; <em>User access expires: Never</em>; <em>Allow offline access: Never</em> = 0 days; and under Assign permissions › Custom, View content, View rights, Edit content, Save and Allow macros ticked, with Copy and extract, Print and Export unticked. Then press <strong>Cancel</strong> — re-saving through the wizard can normalise settings you set in PowerShell.</p>
+
+<h2 class="head"><span class="num">05</span>Personal devices: browser-only wasn't enough</h2>
+<p class="sub">The approved design said "browser-only, no downloads." Testing it showed exactly what that does and doesn't mean.</p>
+
+<p>The CA policy doesn't block anything itself. For users in its scope, it tells SharePoint the device's state and asks SharePoint to enforce its own restriction. SharePoint then applies whatever the <em>site</em> says — so every other site, still at the tenant's <span class="k">AllowFullAccess</span>, carries on as before:</p>
+
+<table class="cmp">
+  <tr><th>Site setting</th><th>Unmanaged device gets</th></tr>
+  <tr><td><span class="k">AllowFullAccess</span></td><td>Everything</td></tr>
+  <tr><td><span class="k">AllowLimitedAccess</span></td><td>Web only. No download, print or sync (Microsoft's fixed definition)</td></tr>
+  <tr><td><span class="k">BlockAccess</span></td><td>Nothing</td></tr>
+</table>
+
+<p>I tested limited access with my test account in the group, a fresh InPrivate window on a non-client laptop:</p>
+<ul class="scopebox">
+  <li><span class="mk yes">✔</span><b>Banner:</b> "Your organization doesn't allow you to download, print, or sync using this device…"</li>
+  <li><span class="mk yes">✔</span><b>Download gone</b> from the toolbar, the file menu and the <em>More</em> submenu. Sync gone.</li>
+  <li><span class="mk yes">✔</span><b>Transcript download greyed out:</b> "You don't have permission to download the transcript."</li>
+  <li><span class="mk yes">✔</span><b>Word files</b> open in "View mode – Edits can't be made" once <span class="k">AllowEditing $false</span> is set.</li>
+  <li><span class="mk no">✘</span><b>Transcript lines still editable, video still trimmable</b> — in the same session.</li>
+  <li><span class="mk no">✘</span><b>Transcript text still copyable</b> out of the browser.</li>
+</ul>
+
+<pre class="code">Set-SPOSite -Identity $site -ConditionalAccessPolicy AllowLimitedAccess
+Set-SPOSite -Identity $site -AllowEditing $false     <span class="cm"># prompts to (re)set AllowLimitedAccess: Y</span>
+Get-SPOSite -Identity $site -Detailed | Select ConditionalAccessPolicy, AllowEditing, LimitedAccessFileType
+<span class="cm"># keep LimitedAccessFileType = WebPreviewableFiles — OfficeOnlineFilesOnly stops video preview</span></pre>
+
+<p><span class="k">AllowEditing</span> covers Office files in Office for the web. It does nothing in the Stream player, where editing follows <em>site permissions</em> — and site permissions have to be edit, because generating a transcript needs edit. There is no Microsoft setting that makes the video player read-only on some devices and editable on others.</p>
+
+<p>So the site moved to <span class="k">BlockAccess</span>: personal devices get "You can't access this site — Due to organizational policies, you can't access this resource from this untrusted device," every other site still opens from the same session, and the sign-in log shows the CA policy as <em>Success</em> with session control "Use app-enforced restrictions." Two quirks: switching to <span class="k">BlockAccess</span> silently resets <span class="k">AllowEditing</span> to <span class="k">True</span> (no effect while blocked; set it again if you ever go back), and anyone <em>outside</em> the CA policy's scope — including the admin who built it — isn't subject to the device rule at all.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>A compliant laptop can still look "unmanaged"</h3><p>InPrivate windows and browsers without the work identity don't pass device state. Edge signed in with the work profile does; Chrome needs the Microsoft Single Sign On extension. Put that in the user guide, or the first person working from a perfectly good laptop will report the site as broken.</p></div>
+</div>
+
+<h2 class="head"><span class="num">06</span>The detour: Defender for Cloud Apps</h2>
+<p class="sub">The one product that can block copy, paste and print inside the browser. It worked. It just couldn't be pointed at one site.</p>
+
+<p>Session control routes the browser through a reverse proxy. I scoped a test CA policy to my account only (Office 365 SharePoint Online, client apps = Browser, session = <em>Use Conditional Access App Control › Use custom policy</em>), then built a session policy in the Defender portal (Cloud Apps › Policies › Policy management › <em>Conditional Access</em> tab):</p>
+<ul>
+  <li><strong>Before the first routed sign-in</strong>, Defender says <em>"You don't have any apps deployed with Conditional Access App Control."</em> Sign in once through the policy and SharePoint appears under <em>Automatic Entra ID onboarding</em>.</li>
+  <li><strong>Session control type:</strong> Block activities. <strong>Device tag</strong> does not equal Intune compliant / Hybrid joined. <strong>App</strong> = Office 365 SharePoint Online.</li>
+  <li><strong>Activity types available for SharePoint:</strong> Cut/Copy item, Paste item, Print. That's the whole list. None of the templates mention editing either.</li>
+  <li><strong>Filters available:</strong> activity type, app, device, IP address, location, registered ISP, user, user agent string, user agent tag. No site, URL or sensitivity label.</li>
+</ul>
+
+<p>The behaviour was clean: the address bar became <span class="k">&lt;tenant&gt;.sharepoint.com.mcas.ms</span> after a "monitored" notice; Edge offered to "Switch to work profile" (I chose <em>Continue with current profile</em>, so no client account landed in my browser); the first page was the tenant's root site rather than the link I'd asked for. Then: copy blocked with my custom message, paste blocked, print rendered as <em>"Print Restricted – This page cannot be printed"</em> — and typing an edit into a transcript line, or trimming the video, still worked. Video playback and the transcript pane behaved normally through the proxy.</p>
+
+<p>Without a site filter, rolling it out would block copy and print for those users across <em>all</em> of SharePoint and OneDrive, and proxy all of it. That's a defensible policy for some organisations, but it isn't "protect this site." The test policies went off, and it's documented as its own use case for the day someone wants exactly that.</p>
+
+<h2 class="head"><span class="num">07</span>What the label does — tested, not assumed</h2>
+<p class="sub">Publishing a label changes nothing. Everything below happens only once it's on a file.</p>
+
+<table class="cmp">
+  <tr><th>Test</th><th>Result</th></tr>
+  <tr><td>Word file uploaded to the library</td><td>Labelled automatically</td></tr>
+  <tr><td>Downloaded labelled .docx, opened locally</td><td>"Configuring your computer for Information Rights Management", a sign-in, then the CONFIDENTIAL banner. Still encrypted</td></tr>
+  <tr><td>Same file, View Permission, as the uploader</td><td>Full control — the uploader/labeller is the document's owner, so this proves nothing about members</td></tr>
+  <tr><td>Same file sent to an external account (a <strong>dummy</strong> file — never real content)</td><td>Browser: "Word can't open this document … protected by Information Rights Management". Desktop: "not signed in to Office with an account that has permission"</td></tr>
+  <tr><td>External tester, after that</td><td>A Microsoft "Permissions requested by &lt;org&gt;" B2B consent screen. Cancel it — accepting creates a guest relationship for nothing</td></tr>
+  <tr><td>Label applied to an MP4</td><td>Label shows; download removed <strong>for everyone</strong>; transcript download greyed out; existing transcript still visible</td></tr>
+  <tr><td>MP4 labelled immediately after upload, never opened</td><td>Transcript still generated (~20 minutes). First playback said "This browser or app can't play the video"; <em>Try again</em> worked</td></tr>
+</table>
+
+<p>A few rules that confused people more than once, so they're worth stating flatly:</p>
+<table class="cmp">
+  <tr><th>To…</th><th>You need</th></tr>
+  <tr><td>See a label already on a file</td><td>Only access to the file</td></tr>
+  <tr><td>Apply or change a label</td><td>To be in the label policy</td></tr>
+  <tr><td>Remove or downgrade an encrypting label</td><td>Export or Full control on that file — the person who applied it, or a SharePoint admin with <span class="k">Unlock-SPOSensitivityLabelEncryptedFile</span> (audited, with a justification)</td></tr>
+  <tr><td>Open a labelled Word/PDF</td><td>Membership of the group the label grants rights to, or ownership of the file</td></tr>
+</table>
+<p>Being a SharePoint site owner adds nothing inside an encrypted file. Site permissions and label rights are separate systems that happen to meet in the same library.</p>
+
+<div class="mr">
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">"Documents are labelled automatically" means every file in the library.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">Office and PDF only. <strong>MP4s can't be labelled automatically or by default</strong> — only by a person (a Teams recording can inherit a meeting label; uploads can't). Audio files can't be labelled at all.</p></div></div></div>
+  </div>
+  <div class="mr-card">
+    <div class="mr-myth"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="#F76F72" stroke-width="2" stroke-linecap="round"/></svg></span><div><div class="mr-lab">Myth</div><p class="mr-txt dim">Restricted Content Discovery keeps Copilot away from the site.</p></div></div></div>
+    <div class="mr-real"><div class="mr-row"><span class="mr-ico"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8l3.5 3.5L13 5" stroke="#6FD08C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span><div><div class="mr-lab">Reality</div><p class="mr-txt">It keeps the content out of general Copilot and search <em>results</em>. A licensed user who can open a file can still use Copilot on it. The label without EXTRACT is what actually closes that.</p></div></div></div>
+  </div>
+</div>
+
+<h2 class="head"><span class="num">08</span>Copilot: what a licence adds, and the questions to ask</h2>
+<p class="sub">Someone always asks. Here's the sourced answer.</p>
+<ul>
+  <li><strong>Word Transcribe</strong> goes from 300 to 30,000 minutes a month. Nothing else about it changes, including where the audio is stored.</li>
+  <li><strong>Copilot in Stream</strong> summarises a video, answers questions and finds where topics come up. It needs an existing transcript and permission to view the video. It doesn't create transcripts.</li>
+  <li><strong>Enterprise data protection</strong> applies (Data Protection Addendum and Product Terms): prompts, responses and data reached through Graph aren't used to train foundation models.</li>
+  <li><strong>Copilot returns anything the user can see.</strong> Oversharing is the risk, not the model.</li>
+  <li><strong>Web grounding</strong> sends queries to Bing under the Microsoft Services Agreement, with Microsoft as an independent controller. Admins can switch it off for people handling sensitive material.</li>
+  <li><strong>Prompts and responses are stored in the tenant</strong> for audit and eDiscovery — a records-management question for investigative content.</li>
+  <li><strong>Check who's actually licensed.</strong> With group-based licensing, the licensing group's membership is the control point. In this tenant one person held a licence and nobody in the access group did.</li>
+</ul>
+
+<h2 class="head"><span class="num">09</span>"Unlimited retention" — check before you promise it</h2>
+<p class="sub">The client's answer was "unlimited." That can mean two very different things.</p>
+<pre class="code">Get-RetentionCompliancePolicy | Select Name, Enabled, Mode, @{n='SharePoint';e={$_.SharePointLocation -join ', '}}
+Get-RetentionComplianceRule   | Select Name, Policy, RetentionDuration, RetentionComplianceAction
+Get-ComplianceTag             | Select Name, RetentionAction, RetentionDuration, RetentionType
+Get-SPOTenant | Select EnableAutoExpirationVersionTrim, MajorVersionLimit, ExpireVersionsAfterDays
+<span class="cm"># here: three empty results, then  False  500  0  (site inherits)</span></pre>
+<p>No delete policies, no retention labels, 500 versions kept with no expiry. So "kept until someone deletes it" was already true — no build needed — and every transcript edit stays in version history. The flip side: nothing <em>prevents</em> deletion, and a deleted file is recoverable for up to 93 days, then gone. A "retain forever" policy would protect everything, but it's close to irreversible and storage only grows. That's a decision to put back to the client in those words, not one to make for them. (Check Site lifecycle management policies in the SharePoint admin center too.)</p>
+
+<h2 class="head"><span class="num">10</span>Go-live: three surprises in the first two files</h2>
+<p class="sub">Testing was done with my files. Real use is done with theirs.</p>
+
+<p><strong>The first file was audio.</strong> The request had said MP4. The first upload was an <span class="k">.m4a</span>, and it just sat there: no transcript, no Generate option. Stream transcribes video formats only — <em>mts, m2ts, ts, 3g2, 3gp, 3gp2, 3gpp, asf, wmv, avi, m4v, mov, mp4, mp4v, ogg, webm, movie, mkv, mpg, mpeg</em>. Audio files also can't carry the label. The fix is always on a <strong>working copy</strong>, so the original stays untouched as the record:</p>
+<ul>
+  <li>In the library, "…" › Copy to (same library), then rename the <em>copy</em> from <span class="k">.m4a</span> to <span class="k">.mp4</span> and accept the extension warning. Both are MPEG-4 containers, so this usually works — but I haven't confirmed it yet, so test it on something non-sensitive first.</li>
+  <li>Or make a real video from the audio, on a managed machine:</li>
+</ul>
+<pre class="code">ffmpeg -loop 1 -f lavfi -i color=c=black:s=640x360 -i "input.m4a" `
+  -c:v libx264 -tune stillimage -c:a copy -shortest "output.mp4"</pre>
+<ul>
+  <li>Or use Word Transcribe for that one file — it takes <span class="k">.m4a</span> and separates speakers — accepting that the audio lands in the user's OneDrive.</li>
+</ul>
+
+<p><strong>The second file showed "No label."</strong> It transcribed fine. Two different people asked why the label "didn't apply," and the answer both times was that nobody had applied it — MP4s are manual, always. Before anyone labels it, everyone sees "No label."</p>
+
+<p><strong>The transcripts had to go somewhere else.</strong> The team needed the text in a separate case-management and reporting system, readable by colleagues outside the access group. A labelled transcript opens only for the group — so neither those colleagues nor, quite possibly, that system could read it. The guidance became an order of operations:</p>
+<ol>
+  <li>Open the video › Transcript › <strong>Download</strong>, and put that copy straight into the other system. Don't save it back into the library first (the library would label it).</li>
+  <li>Only then label the video, if it shouldn't be downloadable — the label also disables transcript download.</li>
+  <li>Once it's in the other system, that system's access controls apply, not the site's.</li>
+</ol>
+<p>Step 1 rests on one assumption I haven't verified yet: that a transcript downloaded from an <em>unlabelled</em> video comes out unlabelled. It should, because it never touched the library — but "should" isn't "tested," and I've told them so.</p>
+
+<p>Smaller things from the first week: a <span class="k">(1)</span> on a file name meant a double upload. A colleague outside the access group managed to open a real recording, which earns a quick access review — and a reminder that support staff confirm a transcript <em>exists</em> and stop there:</p>
+<pre class="code">Get-SPOUser -Site $site -Limit All | Select DisplayName, LoginName, IsSiteAdmin, Groups | Format-Table -AutoSize</pre>
+<p>And before adding anyone new, check their laptop is compliant. With <span class="k">BlockAccess</span> on, a non-compliant device gets "You can't access this site," and that reads as broken, not secure.</p>
+
+<h2 class="head"><span class="num">11</span>What none of it can do</h2>
+<p class="sub">Say these out loud before go-live. Each one looks like a bug if the client discovers it.</p>
+<table class="cmp">
+  <tr><th>Gap</th><th>Options</th></tr>
+  <tr><td>No speaker labels in Stream transcripts</td><td>Label manually, or Word Transcribe for those interviews</td></tr>
+  <tr><td>Video player editing (transcript lines, Trim) can't be blocked per device</td><td>Block personal devices; or make most staff Readers (Visitors) and a few Editors — auto-transcription still runs for files under 1 GB, but only editors can upload</td></tr>
+  <tr><td>Copy/paste/print in the browser</td><td>Defender for Cloud Apps, tenant-wide for those users — or block personal devices</td></tr>
+  <tr><td>MP4s can't be auto-labelled; audio can't be labelled</td><td>A step in the user guide</td></tr>
+  <tr><td>Labelled video = no transcript download</td><td>Download first, label after</td></tr>
+  <tr><td>Comments, Reactions, Analytics, Interactivity on by default, per video</td><td>Turn off per video (Video settings), or accept given who can see them. The tenant-wide reactions switch is the wrong tool for one site</td></tr>
+  <tr><td>Downloaded Word files on a member's personal device</td><td>Still readable when signed in (copy/print/export stay blocked). The device rule protects the site, not the file</td></tr>
+  <tr><td>Screenshots and phone photos</td><td>Nothing prevents them</td></tr>
+  <tr><td>Evidence integrity</td><td>Edit rights include trim and delete. Keep originals in the case system; version history and the audit log record changes</td></tr>
+</table>
+
+<h2 class="head"><span class="num">12</span>The checklist I'd run again</h2>
+<p class="sub">Eighteen checks. Three are still open on this build, and they're marked.</p>
+<table class="cmp">
+  <tr><th>#</th><th>Check</th><th>Expect</th></tr>
+  <tr><td>1</td><td>Site vs tenant settings</td><td>Site: sharing Disabled, Block/Limited, RCD True. Tenant: AllowFullAccess</td></tr>
+  <tr><td>2</td><td>Upload a video, don't open it</td><td>Transcript appears ("Generated by Microsoft")</td></tr>
+  <tr><td>3</td><td>Manual Generate</td><td>Completes; "taking more time than expected" is normal</td></tr>
+  <tr><td>4</td><td>Transcript export</td><td>.docx and .vtt, no speaker labels</td></tr>
+  <tr><td>5–6</td><td>Limited access from a personal device</td><td>Banner, no download/sync/print, transcript download greyed — and edit/trim/copy still possible</td></tr>
+  <tr><td>7</td><td>Block access from a personal device</td><td>"You can't access this site"; other sites fine</td></tr>
+  <tr><td>8</td><td>Sign-in log</td><td>CA policy Success, app-enforced restrictions</td></tr>
+  <tr><td>9–10</td><td>Label an MP4, before and after transcription</td><td>Download gone for all; transcript still generated</td></tr>
+  <tr><td>11–13</td><td>Library default label, downloaded copy, outsider</td><td>Labelled, still encrypted, outsider denied</td></tr>
+  <tr><td>14</td><td>Member who didn't upload › View Permission</td><td>View/Edit/Save yes; Copy/Print/Export/Full control no — <span class="rk rk-care">open</span></td></tr>
+  <tr><td>15</td><td>Member on a compliant work laptop</td><td>Full access — <span class="rk rk-routine">passed on first real upload</span></td></tr>
+  <tr><td>16</td><td>.m4a copy renamed to .mp4</td><td>Transcript appears — <span class="rk rk-care">open</span></td></tr>
+  <tr><td>17</td><td>Transcript downloaded from an unlabelled video</td><td>No label on the .docx — <span class="rk rk-care">open</span></td></tr>
+  <tr><td>18</td><td>Non-policy user views a labelled file</td><td>Sees the label name, can't change it</td></tr>
+</table>
+
+<h2 class="head"><span class="num">13</span>Rollback and handover</h2>
+<pre class="code"><span class="cm"># rollback</span>
+Set-SPOSite -Identity $site -ConditionalAccessPolicy AllowFullAccess       <span class="cm"># device rule off</span>
+Set-SPOSite -Identity $site -RestrictContentOrgWideSearch $false
+Remove-LabelPolicy "<span class="k">&lt;policy&gt;</span>"            <span class="cm"># label stops appearing; labels already on files stay</span>
+Unlock-SPOSensitivityLabelEncryptedFile -FileUrl "<span class="k">&lt;file-url&gt;</span>" -JustificationText "<span class="k">&lt;reason&gt;</span>"
+<span class="cm"># CA policy: Off, then delete.  EnableAIPIntegration $false once labels are in use = mixed state; avoid</span>
+
+<span class="cm"># handover — primary owner first, or you can't remove yourself</span>
+Set-SPOSite -Identity $site -Owner "<span class="k">&lt;owner-upn&gt;</span>"
+Set-SPOUser -Site $site -LoginName "<span class="k">&lt;admin-upn&gt;</span>" -IsSiteCollectionAdmin $false
+Remove-SPOUser -Site $site -LoginName "<span class="k">&lt;admin-upn&gt;</span>" -Group "<span class="k">&lt;Site Title&gt;</span> Owners"
+Set-LabelPolicy "<span class="k">&lt;policy&gt;</span>" -RemoveExchangeLocation "<span class="k">&lt;admin-upn&gt;</span>"
+Remove-DistributionGroupMember "<span class="k">&lt;sg-name&gt;</span>" -Member "<span class="k">&lt;admin-upn&gt;</span>" -Confirm:$false</pre>
+<p>The build account has to come off the site precisely because it sits outside the CA policy's scope — it's the one account the device rule never applied to. Delete the test files, turn off test policies, and send a one-page guide: upload from a work laptop; video only; download the transcript before labelling; label anything that mustn't leave; turn off comments and reactions; check the transcript against the recording; Edge signed in with the work profile.</p>
+
+<p>Two findings came out of the work that weren't part of it, and I raised them separately: the tenant's default external sharing allowed "Anyone" links (this site overrides it; others may not), and Copilot's licensing group needs watching whenever access-group membership changes.</p>
+
+<div class="takeaway">
+  <p class="tag">The one-line model</p>
+  <p>Stream keeps the transcript with the video; the site, the group and a site-level device rule keep the video in place; an encrypting label without EXTRACT keeps documents protected after they leave and keeps Copilot out. None of them can make the video player read-only on a personal device, label an MP4 for you, or transcribe an audio file — so test with your files, then expect the client's files to be different.</p>
+</div>
+
+<div class="sources"><h2>Sources &amp; further reading</h2><ul>
+  <li><a href="https://support.microsoft.com/en-us/clipchamp/stream-pages/view-edit-and-manage-video-transcripts-and-captions">View, edit, and manage video transcripts and captions</a><span>limits, formats, storage and inheritance</span></li>
+  <li><a href="https://support.microsoft.com/en-us/word/transcribe-your-recordings">Transcribe your recordings (Word)</a><span>formats, OneDrive storage, minute limits</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/purview/sensitivity-labels-sharepoint-onedrive-files">Sensitivity labels for files in SharePoint and OneDrive</a><span>MP4 support and its limits</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/sharepoint/control-access-from-unmanaged-devices">Control access from unmanaged devices</a><span>limited vs block, site-level settings</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/sharepoint/get-ready-copilot-sharepoint-advanced-management">SharePoint Advanced Management</a><span>Restricted Content Discovery</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/purview/ai-microsoft-purview">Purview protections for Copilot</a><span>why EXTRACT matters</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/microsoft-365/copilot/microsoft-365-copilot-privacy">Data, privacy and security for Microsoft 365 Copilot</a><span>permissions, training, storage</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/copilot/privacy-and-protections">Copilot Chat privacy and protections</a><span>web grounding and Bing terms</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/defender-cloud-apps/session-policy-aad">Defender for Cloud Apps session policies</a><span>the detour in section 06</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/microsoft-365-apps/privacy/connected-experiences">Connected experiences in Office</a><span>where Transcribe actually sits</span></li>
+</ul></div>
+
+</div>
+</article>
+
+<div class="connect">
+<div class="row"><span class="lab">Filed under</span><a class="lk" href="/cloud/purview-governance.html"><div class="t">Cloud Security › Purview &amp; governance</div><div class="d">Browse this part of the knowledge base.</div></a></div>
+<div class="row"><span class="lab">Related</span><div class="grid2"><a class="lk" href="/posts/teams-auto-record-sensitivity-label.html"><div class="t">Auto-recording Teams meetings, hands-off</div><div class="d">Cloud Security · Purview &amp; governance</div></a><a class="lk" href="/posts/entra-internet-access.html"><div class="t">Deploying Entra Internet Access, end to end</div><div class="d">Cloud Security · Secure access (SSE)</div></a></div></div>
+</div>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Ram Mudigina · Ground Truth</span>
+    <span><a href="/index.html">Home</a> · <a href="/about.html">About</a></span>
+  </div>
+</footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>
