@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>(function(){try{var t=localStorage.getItem('gt-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<script defer src="/assets/theme.js?v=1"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restricted from sending, nobody hit the limit — Ground Truth</title>
+<meta name="description" content="A High-severity &quot;lateral movement&quot; incident, a user restricted from sending email, and an outbound limit of 500/hour against 35 messages all day. The restriction wasn't a limit breach — it was the outbound filter scoring his calendar forwards as spam. How to tell the counter from the verdict, find the exact hour in EmailEvents, rule out compromise, and hand off a benign positive.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;680;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=33">
+<style>
+  .tldr{border:1px solid var(--line); border-radius:8px; background:var(--bg-2); padding:6px 18px; margin:26px 0}
+  .tldr li{margin:10px 0; color:var(--ink-2)}
+  .tldr b{color:var(--ink)}
+  .cmp td.c{text-align:center; font-variant-numeric:tabular-nums}
+  .cmp td.hot{color:var(--severity); font-weight:600}
+  @media (max-width:640px){ .mr{grid-template-columns:1fr}
+    .cmp{font-size:12.5px} .cmp th,.cmp td{padding:8px 9px; overflow-wrap:anywhere}
+    .k.long{white-space:normal; overflow-wrap:anywhere} }
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Ground <b>Truth</b></span>
+      <span class="tag">field notes · defensive security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/" aria-current="page">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/email/">Email Security</a><span class="sep">›</span><a href="/email/outbound.html">Outbound security</a></p>
+    <p class="eyebrow"><span class="dot"></span>Deep dive + field case · outbound filtering · incident triage</p>
+    <h1>Restricted from sending, <em>nobody hit the limit</em></h1>
+    <p class="lede">A user got blocked from sending email. The outbound policy limit was 500 an hour; he'd sent about 35 messages all day. The restriction wasn't a limit breach — it was the outbound filter deciding his calendar invites were spam. Here's how to tell the counter from the verdict, find the exact hour it happened, and prove it was benign without hand-waving.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>October 27, 2026</span>
+      <span>~12 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<p>Late on a Monday afternoon, Defender raised a High-severity incident titled <em>"Lateral movement incident involving one user."</em> Two alerts inside it, twenty minutes apart: <strong>Suspicious email sending patterns detected</strong>, then <strong>User restricted from sending email</strong>. MITRE tag T1534, Internal Spearphishing. The incident graph showed one user, one mailbox, one IP.</p>
+
+<p>The "what happened" box read: <em>User has been restricted from sending messages outside the organization due to potential compromised activity.</em> That sentence is boilerplate. It appears on every one of these restrictions and tells you nothing about what the user did. The T1534 tag is Defender's default mapping for this alert type, not a finding. So you start with a High incident, a scary title, and no evidence at all.</p>
+
+<p>The user — call him Bryan — works for a firm that was recently acquired. He has a mailbox in the parent tenant and still has his old mailbox at the acquired firm. Hold onto that; it's the whole story.</p>
+
+<div class="tldr">
+<ul>
+  <li><b>Two mechanisms, one alert.</b> Exchange restricts a sender either by <em>counter</em> (recipients-per-hour/day limit) or by <em>verdict</em> (the outbound filter scoring the user's own mail as spam). The alert never says which.</li>
+  <li><b>One question settles it.</b> Ask for the outbound policy limit. 500/hour against ~35 messages all day ruled out the counter in a single number.</li>
+  <li><b>The reason lives in outbound columns.</b> <span class="k">ThreatTypes</span> and <span class="k">DetectionMethods</span> on his <em>outbound</em> rows — binned by hour — showed zero spam verdicts all day, then seven in one hour.</li>
+  <li><b>What the filter saw:</b> seven <span class="k">FW:</span> calendar invites to his other mailbox, six inside four minutes. One sender relaying near-identical corporate content to one external address. That is exactly what a compromised relay looks like.</li>
+  <li><b>Verdict:</b> benign positive. Legitimate activity, correctly described by the filter as spam-shaped, incorrectly described by the alert as compromise.</li>
+</ul>
+</div>
+
+<h2 class="head"><span class="num">01</span>Start from zero evidence</h2>
+<p class="sub">The alert text is the same on every one of these. Read it, then set it aside.</p>
+
+<p>"Potential compromised activity" and the T1534 tag are generated, not observed. Nothing in the incident tells you whether Bryan sent a phishing blast, tripped a counter, or forwarded a meeting invite. The title says lateral movement; the only way to know is to go to the data and reconstruct what actually left his mailbox.</p>
+
+<h2 class="head"><span class="num">02</span>First pass: what did he actually send?</h2>
+<p class="sub">The first question for any "compromised sender" alert is whether it's a spray.</p>
+
+<p>Pull everything the user sent around the alert window from <span class="k">EmailEvents</span>, binned small, with recipient counts and verdicts:</p>
+
+<pre class="code"><span class="cm">// what left the mailbox around the alert — spray check</span>
+EmailEvents
+| where Timestamp between (start .. end)
+| where SenderFromAddress =~ user
+| where EmailDirection in ("Outbound", "Intra-org")
+| summarize Msgs = count(), Recipients = dcount(RecipientEmailAddress),
+    ExtDomains = dcount(tostring(split(RecipientEmailAddress, "@")[1])),
+    Subjects = make_set(Subject, 10), Verdicts = make_set(ThreatTypes),
+    Failed = countif(DeliveryAction in ("Blocked", "Junked"))
+    by bin(Timestamp, 5m), EmailDirection</pre>
+
+<p>Not a spray. Eleven outbound messages in the hour before the restriction, to three recipients. Every subject was a calendar item — <span class="k">Declined:</span>, <span class="k">Accepted:</span>, a meeting invite, and <span class="k">Focus time</span> sent five times in twelve minutes to the same address. That address was Bryan's own mailbox at the acquired firm.</p>
+
+<p>Then a burst of <span class="k">Undeliverable:</span> messages, intra-org, all after the restriction time. Those are postmaster NDRs bouncing his calendar responses back to him once the block kicked in — effect, not cause, and easy to misread as part of the attack if you don't check the timestamps. URLs and attachments across everything he sent: signature-service tracking links, inline signature images, Teams join links, two company logos, a CPE platform. Nothing that looks like a lure.</p>
+
+<p>At this point it already smelled benign. But "smells benign" isn't a finding, and the client's InfoSec team was going to ask the obvious question: if it's benign, why did Microsoft restrict him?</p>
+
+<h2 class="head"><span class="num">03</span>Two mechanisms, one alert</h2>
+<p class="sub">Exchange Online can restrict a sender two different ways, and they have different fixes.</p>
+
+<table class="cmp">
+  <tr><th></th><th>Mechanism A — the counter</th><th>Mechanism B — the verdict</th></tr>
+  <tr><td><strong>What it is</strong></td><td>The outbound anti-spam policy limits: recipients per hour (external and internal) and per day</td><td>EOP runs outbound mail through the same filtering stack as inbound and scores it for spam</td></tr>
+  <tr><td><strong>Trigger</strong></td><td>Breach the recipient count. A number</td><td>Enough of the user's outbound mail gets a spam verdict. "Suspicious sending patterns"</td></tr>
+  <tr><td><strong>Symptom</strong></td><td>Obvious once you see the volume</td><td>Mail is still delivered (the receiver decides what to junk), so nothing bounces and the user has no idea</td></tr>
+  <tr><td><strong>Fix</strong></td><td>A bulk-send exception</td><td>An exception does <em>not</em> override the filter — the behaviour has to change, or they're back on the list next week</td></tr>
+</table>
+
+<p>My first instinct was A. I asked for the policy limit: 500 per hour. Bryan had sent about 35 messages the whole day. Mechanism A was off the table in one question — which matters, because a bulk-send exception would have "fixed" nothing and he'd have been restricted again the next time he did his calendar.</p>
+
+<h2 class="head"><span class="num">04</span>Finding the hour</h2>
+<p class="sub">If it's the verdict, the evidence is in <span class="k">ThreatTypes</span> and <span class="k">DetectionMethods</span> on the outbound rows — columns almost everyone only ever reads on inbound mail.</p>
+
+<p>Bin the whole day by hour and count them:</p>
+
+<pre class="code"><span class="cm">// mechanism B — find the hour the spam verdicts started</span>
+EmailEvents
+| where Timestamp between (startOfDay .. endOfDay)
+| where SenderFromAddress =~ user
+| where EmailDirection in ("Outbound", "Intra-org")
+| summarize Msgs = count(), Recips = dcount(RecipientEmailAddress),
+    ToOtherFirm = countif(RecipientEmailAddress endswith "otherfirm.com"),
+    Subjects = make_set(Subject, 8),
+    Spam = countif(ThreatTypes has "Spam"),
+    Bulk = countif(BulkComplaintLevel > 0),
+    Detections = make_set(DetectionMethods)
+    by bin(Timestamp, 1h), EmailDirection
+| order by Timestamp asc</pre>
+
+<p>The result told the whole story in one table:</p>
+
+<table class="cmp">
+  <tr><th>Hour (local)</th><th>Outbound msgs</th><th>To his other mailbox</th><th>Spam-tagged</th></tr>
+  <tr><td>8 AM</td><td class="c">3</td><td class="c">1</td><td class="c">0</td></tr>
+  <tr><td>10 AM</td><td class="c">4</td><td class="c">1</td><td class="c">0</td></tr>
+  <tr><td>2 PM</td><td class="c">1</td><td class="c">0</td><td class="c">0</td></tr>
+  <tr><td>3 PM</td><td class="c">15</td><td class="c">13</td><td class="c">0</td></tr>
+  <tr><td>4 PM</td><td class="c">19</td><td class="c">17</td><td class="c hot">7</td></tr>
+  <tr><td>5 PM</td><td class="c">7</td><td class="c">5</td><td class="c">0 <span style="color:var(--ink-3)">(restricted 5:26)</span></td></tr>
+</table>
+
+<p>Zero spam verdicts all day, then seven in the 4 PM hour, with <span class="k">DetectionMethods</span> reading <span class="k">{"Spam":["General filter"]}</span>. The alert fired at 5:07. The restriction landed at 5:26.</p>
+
+<p>Pulling the seven: all <span class="k">FW:</span> calendar invites to his other mailbox — internal training sessions, an annual tax-update series, a two-day strategy event. Six of the seven went out inside a four-minute window.</p>
+
+<p>So what did the filter see? One sender, one external recipient, a run of near-identical forwarded messages seconds apart, carrying corporate event content. That's what a mailbox being used as a relay looks like. The filter was doing its job. It just had no way to know the recipient <em>was</em> the sender.</p>
+
+<h2 class="head"><span class="num">05</span>Ruling out compromise</h2>
+<p class="sub">Knowing why it fired doesn't prove the account is clean. A compromised mailbox would also forward things.</p>
+
+<p>Three checks before I'd call it benign.</p>
+
+<p><strong>Sign-ins.</strong> The incident graph named one IP. Fourteen days of <span class="k">SigninLogs</span> summarised by IP, location and device, with the alert IP flagged. The IP had been in his history for two weeks — same metro as his other IPs, same device name every time, carrying the corporate client stack (Zscaler, Defender, Authentication Broker). All result code 0, no risk level. His phone showed up compliant and managed.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>Two sign-in gotchas that look like findings</h3><p>In the unified portal with a Sentinel workspace selected, <span class="k">AADSignInEventsBeta</span> doesn't resolve — use <span class="k">SigninLogs</span>. And an empty result for a narrow window usually means Outlook was running on an existing token, not that nobody signed in; check <span class="k">AADNonInteractiveUserSignInLogs</span> before you panic.</p></div>
+</div>
+
+<p>The device showed <span class="k">IsCompliant = false</span>, <span class="k">IsManaged = false</span>. For a second that looked like a finding. It isn't: the laptop is managed by the acquired firm's tenant and only Entra-registered in the parent tenant, so the parent's Intune has no compliance state to report. Expected for any cross-tenant M&amp;A user — worth knowing before it ends up in an escalation email.</p>
+
+<p><strong>Forwarding.</strong> Mailbox-level SMTP forwarding was off in EAC. The forwards weren't a rule either: the intra-org rows showed <span class="k">Meeting Forward Notification:</span> entries, which Exchange generates when a user forwards an invite by hand. He was doing it himself, one invite at a time.</p>
+
+<p><strong>Content.</strong> Already covered — nothing in the URLs or attachments that a phishing kit would leave behind.</p>
+
+<p>Seven days of history filled in the context. A week earlier he'd sent a reply-all to a ~110-recipient external sponsorship list; three days of out-of-office auto-replies after that; then Monday's forwarding run. None of it malicious, all of it the kind of thing that nudges an account's baseline toward "unusual."</p>
+
+<h2 class="head"><span class="num">06</span>The handoff</h2>
+<p class="sub">As the MSSP, I can release a restricted sender in this tenant, but only with the client's InfoSec sign-off.</p>
+
+<p>So the output of all this was one short email: what triggered it (seven spam-tagged calendar forwards in a 25-minute window), why it wasn't a limit breach (500/hr policy, ~35 sent), what we checked (outbound mail, content, forwarding, sign-ins), and the ask (OK to release, and someone should tell him to stop).</p>
+
+<p>The user-side fix is behavioural. Bulk-forwarding invites from one tenant to a personal mailbox in another will always look like relaying. If he needs both calendars, that's a calendar-sharing or delegation problem for the integration team, not something an exception in the anti-spam policy can paper over.</p>
+
+<div class="takeaway">
+  <p class="tag">Classification</p>
+  <p><strong>Benign positive.</strong> Legitimate activity, correctly described by the filter as spam-shaped, incorrectly described by the alert as compromise. The counter was never touched; the verdict was earned honestly by behaviour that happens to be indistinguishable from a relay.</p>
+</div>
+
+<h2 class="head"><span class="num">07</span>Takeaways</h2>
+<p class="sub">The things that turn this from a two-hour scramble into a twenty-minute triage.</p>
+
+<ol>
+  <li><strong>The alert text is boilerplate.</strong> "Potential compromised activity" and the T1534 tag appear on every one of these. Start from zero evidence.</li>
+  <li><strong>Ask for the outbound policy limit first.</strong> One number tells you whether you're chasing a counter or a verdict — and the two have different fixes.</li>
+  <li><strong>Look at <span class="k">ThreatTypes</span> on outbound rows.</strong> Everyone reads verdicts on inbound mail. The outbound filter writes to the same columns, and that's where the restriction reason lives.</li>
+  <li><strong>Bin by hour across the whole day.</strong> The restriction is cumulative. The alert window shows the tail; the hourly table shows the ramp and the exact hour the verdicts started.</li>
+  <li><strong>Calendar items count as sends.</strong> Accepted/Declined responses, forwarded invites, Focus-time bookings, auto-replies. A user who does nothing but calendar admin for an afternoon can look like a bot.</li>
+  <li><strong><span class="k">Undeliverable:</span> after the restriction time is noise.</strong> Check timestamps before adding NDRs to the story.</li>
+  <li><strong>Cross-tenant users look non-compliant.</strong> A device managed by another tenant and only registered in yours reports <span class="k">IsCompliant = false</span>. Know this before it goes in an escalation.</li>
+  <li><strong>A bulk-send exception doesn't fix a spam verdict.</strong> If it's mechanism B, the behaviour has to change.</li>
+</ol>
+
+<p>The six queries from this one are in my library as a runbook — placeholders only — for the next time the title says lateral movement and the data says calendar.</p>
+
+<div class="sources"><h2>Sources &amp; further reading</h2><ul>
+  <li><a href="https://learn.microsoft.com/en-us/defender-office-365/outbound-spam-policies-configure">Configure outbound spam policies</a><span>the recipient-per-hour / per-day limits — mechanism A</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/defender-office-365/outbound-spam-sending-limits-troubleshoot">Troubleshoot outbound sending limits in Exchange Online</a><span>what the limits and restrictions mean in practice</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/defender-office-365/outbound-spam-restore-restricted-users">Remove blocked users from the Restricted entities page</a><span>releasing a restricted sender after review</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/defender-xdr/advanced-hunting-emailevents-table">EmailEvents table in the advanced hunting schema</a><span>ThreatTypes, DetectionMethods, BulkComplaintLevel, EmailDirection</span></li>
+</ul></div>
+
+</div>
+</article>
+
+<div class="connect">
+<div class="row"><span class="lab">Filed under</span><a class="lk" href="/email/outbound.html"><div class="t">Email Security › Outbound security</div><div class="d">Browse this part of the knowledge base.</div></a></div>
+<div class="row"><span class="lab">Related</span><div class="grid2"><a class="lk" href="/posts/website-form-phishing-two-reviews.html"><div class="t">Cleared as safe: a website-form phish that fooled two reviews</div><div class="d">Email Security · Inbound security</div></a><a class="lk" href="/posts/central-auto-reply-one-rule-one-flow.html"><div class="t">One auto-reply for 21 mailboxes, not 21 rules</div><div class="d">Email Security · Delivery &amp; mail flow</div></a></div></div>
+</div>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Ground Truth</span>
+  <span><a href="/">Home</a> · <a href="/email/">Email</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>

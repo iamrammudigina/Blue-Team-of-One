@@ -1,5 +1,13 @@
 [
 {
+"url": "/posts/restricted-from-sending-nobody-hit-the-limit.html",
+"title": "Restricted from sending, nobody hit the limit",
+"excerpt": "A High \"lateral movement\" incident and a user blocked from sending email, with the outbound limit at 500/hour against 35 messages all day. Telling the recipient-limit counter from the outbound spam verdict, finding the exact hour in EmailEvents, ruling out compromise, and handing off a benign positive.",
+"vertical": "Email Security",
+"section": "Outbound security",
+"text": "User restricted from sending email, Defender High incident Lateral movement T1534 Internal Spearphishing, suspicious email sending patterns detected. Boilerplate alert potential compromised activity. Two mechanisms: A outbound anti-spam policy recipient limits per hour per day a counter, bulk-send exception fix; B outbound filter EOP scores user's own mail as spam a verdict, behaviour must change. Policy limit 500 per hour, about 35 messages all day ruled out mechanism A. EmailEvents outbound intra-org rows, ThreatTypes DetectionMethods General filter, BulkComplaintLevel, bin by hour. Seven spam-tagged FW calendar invites to his other mailbox in a 25-minute window, forwarded by hand Meeting Forward Notification, cross-tenant M&A user with mailbox in parent and acquired firm. Undeliverable NDRs after restriction are noise. Ruling out compromise: SigninLogs 14 days one IP in history, AADSignInEventsBeta does not resolve in unified portal use SigninLogs, AADNonInteractiveUserSignInLogs for token-only sessions. Device IsCompliant false IsManaged false because managed by other tenant only Entra-registered. Mailbox SMTP forwarding off in EAC. Benign positive. Release restricted sender with client InfoSec sign-off. Bulk-send exception does not fix a spam verdict. Outbound spam Restricted entities."
+},
+{
 "url": "/posts/sharepoint-specific-people-link-expiry.html",
 "title": "Making \"Specific people\" links expire, per person",
 "excerpt": "Microsoft 365 can expire Anyone links but has no admin expiry for Specific people links. A daily Power Automate flow removes each external reviewer's access N days after they were shared, ageing people rather than links, plus the 403 and 5,000-item traps that only appear in production.",
