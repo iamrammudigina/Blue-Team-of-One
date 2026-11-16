@@ -1,5 +1,13 @@
 [
  {
+  "url": "/posts/ti-match-open-door.html",
+  "title": "The TI match was the least interesting part",
+  "excerpt": "Two Sentinel TI-match alerts on firewall syslog: one Cloudflare false positive, one inbound session to an email archiver's admin page. A 1:1 NAT rule allowed any port from anywhere because Exchange Online journaling needed port 25. Fixed by restricting to TCP 25 and validating journaling still delivers.",
+  "vertical": "SOC Operations",
+  "section": "Alert triage",
+  "text": "Microsoft Sentinel threat intelligence match NetworkSourceIPv4 Syslog analytics rule, MSTIC indicator, Storm designation emerging actor. Cloudflare false positive origin pull. Meraki MX syslog ip_flow_start ip_flow_end firewall urls events, 1:1 NAT allowed inbound any protocol any port 0.0.0.0/0. Barracuda Message Archiver admin web interface port 8000, default certificate barracuda.barracudanetworks.com, command injection patch. Exchange Online journaling, journal rule, outbound connector smart host, port 25, Get-JournalRule, Get-OutboundConnector, message trace Get-MessageTraceV2. Change request, before and after evidence, validation. KQL raw syslog parse extract src dst dport translated_dst_ip, cross-table IOC sweep, inbound exposure by port. Internal-only assumption, test from outside."
+ },
+ {
   "url": "/posts/dns-migrated-registrar-not.html",
   "title": "You migrated the DNS. Did you migrate the registrar?",
   "excerpt": "A whole acquired domain stopped receiving email and nothing in Microsoft 365 or the mail gateway was broken. The DNS had been migrated after the acquisition but the registrar never was, so an outsider switched the nameservers to an empty default zone with no MX.",
