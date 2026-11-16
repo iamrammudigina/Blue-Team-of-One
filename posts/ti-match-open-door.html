@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>(function(){try{var t=localStorage.getItem('gt-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<script defer src="/assets/theme.js?v=1"></script>
+<script type="application/json" id="gt-meta">{"vertical": "soc", "section": "triage", "fmtc": "deep", "fmt": "Deep dive + field case", "date": "2026-11-16", "title": "The TI match was the least interesting part", "teaser": "Two threat-intel alerts on firewall syslog. One was Cloudflare noise. The other led to an email archiver whose admin page had been open to the whole internet, kept open by a rule nobody remembered was there for mail journaling.", "stitle": "The TI match was the least interesting part", "excerpt": "Two Sentinel TI-match alerts on firewall syslog: one Cloudflare false positive, one inbound session to an email archiver's admin page. A 1:1 NAT rule allowed any port from anywhere because Exchange Online journaling needed port 25. Fixed by restricting to TCP 25 and validating journaling still delivers.", "text": "Microsoft Sentinel threat intelligence match NetworkSourceIPv4 Syslog analytics rule, MSTIC indicator, Storm designation emerging actor. Cloudflare false positive origin pull. Meraki MX syslog ip_flow_start ip_flow_end firewall urls events, 1:1 NAT allowed inbound any protocol any port 0.0.0.0/0. Barracuda Message Archiver admin web interface port 8000, default certificate barracuda.barracudanetworks.com, command injection patch. Exchange Online journaling, journal rule, outbound connector smart host, port 25, Get-JournalRule, Get-OutboundConnector, message trace Get-MessageTraceV2. Change request, before and after evidence, validation. KQL raw syslog parse extract src dst dport translated_dst_ip, cross-table IOC sweep, inbound exposure by port. Internal-only assumption, test from outside.", "vlabel": "SOC Operations", "slabel": "Alert triage"}</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The TI match was the least interesting part — Ground Truth</title>
+<meta name="description" content="Two Sentinel threat-intel alerts on firewall syslog. One was Cloudflare noise. The other was an inbound session to an email archiver's admin page, open to the whole internet because of a firewall rule kept for Exchange Online journaling. How the triage went, and how the rule was closed without breaking journaling.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;680;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=33">
+<style>
+  .tldr{border:1px solid var(--line); border-radius:8px; background:var(--bg-2); padding:6px 18px; margin:26px 0}
+  .tldr li{margin:10px 0; color:var(--ink-2)}
+  .tldr b{color:var(--ink)}
+  ul.check{list-style:none; padding-left:0}
+  ul.check li{padding-left:28px; position:relative; margin:9px 0; color:var(--ink-2)}
+  ul.check li:before{content:""; position:absolute; left:0; top:4px; width:15px; height:15px; border:1.5px solid var(--ink-3); border-radius:3px}
+  table.cmp{width:100%; border-collapse:collapse; margin:22px 0; font-size:14px}
+  table.cmp th, table.cmp td{border:1px solid var(--line); padding:9px 12px; text-align:left; vertical-align:top}
+  table.cmp th{background:var(--bg-2); color:var(--ink)}
+  table.cmp td{color:var(--ink-2)}
+  @media (max-width:640px){ table.cmp{font-size:12.5px} table.cmp th, table.cmp td{padding:8px 9px; overflow-wrap:anywhere} }
+  figure svg text{font-family:var(--mono)}
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Ground <b>Truth</b></span>
+      <span class="tag">field notes · defensive security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/" aria-current="page">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/soc/">SOC Operations</a><span class="sep">›</span><a href="/soc/triage.html">Alert triage</a></p>
+    <p class="eyebrow"><span class="dot"></span>Field case · Threat-intel alerts &amp; exposure</p>
+    <h1>The TI match was the <em>least interesting</em> part</h1>
+    <p class="lede">Two threat-intel alerts fired on firewall syslog. One was Cloudflare noise. The other led to an email archiver whose admin page had been reachable from the whole internet, held open by a firewall rule nobody remembered was there for mail journaling.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>November 16, 2026</span>
+      <span>~10 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<div class="tldr">
+<ul>
+  <li><b>Alerts:</b> two hits on Sentinel's <em>TI match for an IP in Syslog</em> rule, same firewall, a few hours apart.</li>
+  <li><b>One:</b> a Cloudflare edge address pulling content from a site behind Cloudflare. False positive.</li>
+  <li><b>The other:</b> an IP tagged to an emerging threat cluster held sessions open on an email archiver's <strong>admin port</strong>, through a 1:1 NAT that allowed <strong>any port from anywhere</strong>.</li>
+  <li><b>Why the rule existed:</b> Exchange Online journaling delivers to the archiver on port 25. Nobody had scoped it to just that.</li>
+  <li><b>Fix:</b> allowed inbound cut to TCP 25, validated from the outside and in message trace.</li>
+</ul>
+</div>
+
+<h2 class="head"><span class="num">01</span>What the rule actually tells you</h2>
+<p class="sub">A string appeared in a log line. That's all.</p>
+
+<p>The analytics rule behind both alerts is one of the stock Sentinel threat-intelligence rules: take every active IP indicator, and look for it anywhere in <span class="k">SyslogMessage</span>. When it matches, you get an incident with the indicator, its source (Microsoft's own feed here, confidence 83), and a threat-actor label.</p>
+
+<p>What you don't get is everything you need for a verdict:</p>
+<ul>
+  <li>which <strong>direction</strong> the traffic went (inbound scan, or an internal machine calling out),</li>
+  <li>whether the firewall <strong>allowed or dropped</strong> it,</li>
+  <li>which <strong>internal host and port</strong> were involved.</li>
+</ul>
+
+<p>So the incident is a pointer, not a finding. The verdict lives in the raw lines the firewall sent. Both alerts came from the same syslog source (the edge firewall's forwarder, which had sent 1.6 million lines in the past day), so the job was the same for both: find the lines, read them.</p>
+
+<pre class="code">Syslog
+| where TimeGenerated between (datetime(2026-11-10) .. datetime(2026-11-12))
+| where SyslogMessage has_any ("&lt;ioc-1&gt;", "&lt;ioc-2&gt;")
+| project TimeGenerated, HostIP, Facility, SyslogMessage
+| order by TimeGenerated asc</pre>
+
+<h2 class="head"><span class="num">02</span>Alert one: Cloudflare, doing Cloudflare things</h2>
+<p class="sub">Shared edge addresses say almost nothing about who's behind them.</p>
+
+<p>The first indicator sat in Cloudflare's address space, which thousands of customers share. Reputation services treat that block as a reverse-proxy range for exactly that reason. An indicator on one of those addresses is weak on its own.</p>
+
+<p>The raw lines settled it. Five TCP/443 connections, within 0.4 seconds, on sequential source ports, to one public IP that a firewall rule published only on 443. That's what an origin pull looks like: Cloudflare's edge fetching content from a site it fronts. A DNS check confirmed the site on that public IP sits behind Cloudflare. Closed as a false positive.</p>
+
+<h2 class="head"><span class="num">03</span>Alert two: the sessions that stayed open</h2>
+<p class="sub">An indicator with no public reporting, and traffic that was let through.</p>
+
+<p>The second indicator was labelled with a Microsoft "Storm" designation, the name Microsoft gives an emerging or still-developing cluster of activity. Nothing public on the IP, nothing public on the cluster. That's not reassuring; it means you can't lean on anyone else's write-up.</p>
+
+<p>The firewall here logs Meraki-style events, and the event type is the first thing to pull out of each line:</p>
+
+<table class="cmp">
+  <tr><th>Event</th><th>What it showed</th></tr>
+  <tr><td><span class="k">ip_flow_start</span></td><td>Three inbound sessions from the IOC to one of the organisation's public IPs: port 8000, then 443, then 443 again. Each NATed to the same internal host.</td></tr>
+  <tr><td><span class="k">ip_flow_end</span></td><td>A matching end for each, 4 to 5 minutes later. Held-open sessions, not dropped packets.</td></tr>
+  <tr><td><span class="k">urls</span></td><td>The internal host answering on 443 with the host name <span class="k">barracuda.barracudanetworks.com</span>.</td></tr>
+</table>
+
+<p>That last line identified the box. <span class="k">barracuda.barracudanetworks.com</span> is the default certificate name on Barracuda appliances, and 8000 is the default port for their admin web interface. Asking the client confirmed it: their <strong>Barracuda Message Archiver</strong>, the appliance that keeps a copy of every email for compliance.</p>
+
+<p>Widening the window found more. The same IP had visited <strong>a week earlier</strong>, before the indicator ever matched. The alert fired on the second visit, not the first.</p>
+
+<pre class="code">Syslog
+| where TimeGenerated &gt; ago(30d)
+| where SyslogMessage has_any ("&lt;ioc-1&gt;", "&lt;ioc-2&gt;")
+| extend EventType = extract(@"\s(ip_flow_start|ip_flow_end|firewall|urls)\s", 1, SyslogMessage),
+         Src    = extract(@"src=([\d\.]+)", 1, SyslogMessage),
+         Dst    = extract(@"dst=([\d\.]+)", 1, SyslogMessage),
+         DPort  = extract(@"dport=(\d+)", 1, SyslogMessage),
+         NatDst = extract(@"translated_dst_ip=([\d\.]+)", 1, SyslogMessage)
+| summarize Hits = count(), First = min(TimeGenerated), Last = max(TimeGenerated),
+            Days = dcount(bin(TimeGenerated, 1d)) by Src, Dst, DPort, NatDst, EventType
+| order by First asc</pre>
+
+<h2 class="head"><span class="num">04</span>The door: a 1:1 NAT with nothing on it</h2>
+<p class="sub">The firewall wasn't broken. It was doing exactly what it was told.</p>
+
+<p>The archiver had a 1:1 NAT on the edge firewall: one public IP mapped straight to its internal address. The allowed-inbound rule on that mapping was <strong>any protocol, any port, from 0.0.0.0/0</strong>. Everything the appliance listened on, including the admin login page, was on the internet.</p>
+
+<figure>
+  <svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Before: the internet and Exchange Online both reach the archiver through a 1:1 NAT allowing any port, exposing admin ports 8000 and 443 and SMTP 25. After: only TCP 25 is allowed, so Exchange Online journaling still reaches the archiver and the admin ports are closed.">
+    <g style="fill:none;stroke:var(--line-2,#888);stroke-width:1.4">
+      <rect x="20" y="40" width="150" height="56" rx="8"/>
+      <rect x="20" y="120" width="150" height="56" rx="8"/>
+      <rect x="250" y="62" width="170" height="92" rx="8"/>
+      <rect x="520" y="40" width="180" height="136" rx="8"/>
+    </g>
+    <g style="fill:var(--ink,#222);font-size:13px">
+      <text x="95" y="66" text-anchor="middle">Internet</text>
+      <text x="95" y="84" text-anchor="middle" style="font-size:11px;fill:var(--ink-3,#666)">anyone, incl. the IOC</text>
+      <text x="95" y="146" text-anchor="middle">Exchange Online</text>
+      <text x="95" y="164" text-anchor="middle" style="font-size:11px;fill:var(--ink-3,#666)">journal reports</text>
+      <text x="335" y="92" text-anchor="middle">Edge firewall</text>
+      <text x="335" y="112" text-anchor="middle" style="font-size:11px;fill:var(--ink-3,#666)">1:1 NAT</text>
+      <text x="335" y="132" text-anchor="middle" style="font-size:11px;fill:var(--stop,#b33)">BEFORE: any / any / 0.0.0.0/0</text>
+      <text x="610" y="66" text-anchor="middle">Message Archiver</text>
+      <text x="610" y="96" text-anchor="middle" style="font-size:11px;fill:var(--stop,#b33)">8000  admin UI</text>
+      <text x="610" y="116" text-anchor="middle" style="font-size:11px;fill:var(--stop,#b33)">443   admin UI</text>
+      <text x="610" y="136" text-anchor="middle" style="font-size:11px;fill:var(--go,#2a7)">25    SMTP (journaling)</text>
+    </g>
+    <g style="stroke:var(--ink-3,#666);stroke-width:1.4;fill:none">
+      <path d="M170 68 L250 90"/><path d="M170 148 L250 126"/><path d="M420 108 L520 108"/>
+    </g>
+    <g style="fill:none;stroke:var(--go,#2a7);stroke-width:1.4">
+      <rect x="20" y="214" width="680" height="64" rx="8"/>
+    </g>
+    <g style="font-size:12px;fill:var(--ink-2,#444)">
+      <text x="40" y="240">AFTER: allowed inbound = TCP 25 only.</text>
+      <text x="40" y="262">Journaling still delivers on 25. From the internet, 8000 and 443 are closed and the login page is gone.</text>
+    </g>
+  </svg>
+  <figcaption><b>The same mapping, before and after.</b> One rule, scoped from "everything" to the one port the business actually needed.</figcaption>
+</figure>
+
+<p>The timing made it worse. Eight days before the second visit, Barracuda had shipped patches for a command-injection flaw (CVE-2026-111560) that affects the Message Archiver among other products, with the fix released as <span class="k">BNMA-32468</span>. An admin interface reachable from the internet is precisely the exposure that matters for that kind of bug. An IP tied to an emerging cluster holding sessions open on that interface, a week after the patch dropped, reads like reconnaissance.</p>
+
+<p>The first job was confirming patch status. Barracuda support confirmed <span class="k">BNMA-32468</span> had been applied the day after release, so the specific bug was closed before either visit. The exposure still had to go.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>"It's internal only" is a claim. Test it from outside.</h3><p>The first answer from the client side was that the archiver was private and not reachable from the internet. It was a reasonable belief: they reached it on its internal address over VPN. A test from an outside network loaded the login page in seconds. Believe the log line, then prove it from the attacker's side.</p></div>
+</div>
+
+<h2 class="head"><span class="num">05</span>Why the door was there: journaling</h2>
+<p class="sub">You can't close a rule until you know what's walking through it.</p>
+
+<p>The obvious fix was to remove the NAT. The obvious fix would have broken compliance archiving. The archiver gets its copies of email through <strong>Exchange Online journaling</strong>:</p>
+
+<ol>
+  <li>A <strong>journal rule</strong> in Exchange Online says "for every message, send a journal report to this address".</li>
+  <li>The address lives on the archiver's own domain, so an <strong>outbound connector</strong> routes it to a smart host.</li>
+  <li>The smart host is the archiver's <strong>public IP</strong>, and the delivery is plain SMTP on <strong>port 25</strong>.</li>
+</ol>
+
+<p>So Microsoft's mail servers on the internet genuinely needed to reach that appliance, on one port. Somewhere along the way the rule had been written as "allow everything" instead of "allow 25", and it stayed that way because it worked.</p>
+
+<pre class="code">Get-JournalRule | Format-List Name, Enabled, Scope, JournalEmailAddress
+Get-OutboundConnector | Format-List Name, Enabled, SmartHosts, RecipientDomains
+
+<b># then prove reports are actually flowing, before and after any change</b>
+Get-MessageTraceV2 -RecipientAddress "journal@&lt;archiver-domain&gt;" -StartDate (Get-Date).AddHours(-2) -EndDate (Get-Date) |
+  Select-Object Received, SenderAddress, Status | Sort-Object Received -Descending | Select-Object -First 20</pre>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>Not every allowed connection is a "flow"</h3><p>My first pass at "does Microsoft even reach this box?" only looked at <span class="k">ip_flow_start</span> events and found nothing, which suggested port 25 wasn't needed. Wrong. The journaling deliveries were logged only as <span class="k">firewall</span> events. Query every event type before concluding traffic doesn't exist.</p></div>
+</div>
+
+<h2 class="head"><span class="num">06</span>The change, and proving it</h2>
+<p class="sub">Collect the before, make one change, collect the after.</p>
+
+<p>The change went through the client's change process with sign-off from both sides: on the archiver's 1:1 NAT, allowed inbound changed from <strong>any / any / 0.0.0.0/0</strong> to <strong>TCP 25</strong>. The source stayed open for now, because Exchange Online sends from a wide and changing set of addresses.</p>
+
+<p>Before the change I captured the journal rule, the connector and a message trace of journal reports. Afterwards I checked the same things again, plus the attacker's view:</p>
+
+<table class="cmp">
+  <tr><th>Check</th><th>Before</th><th>After</th></tr>
+  <tr><td>TCP 8000 from the internet</td><td>Open, admin login page</td><td>Closed</td></tr>
+  <tr><td>TCP 443 from the internet</td><td>Open, admin login page</td><td>Closed</td></tr>
+  <tr><td>TCP 25 from the internet</td><td>Open</td><td>Open</td></tr>
+  <tr><td>Journal reports in message trace</td><td>Delivered</td><td>Delivered</td></tr>
+  <tr><td>Admin access over VPN / internal</td><td>Works</td><td>Works</td></tr>
+</table>
+
+<p>One more query to keep around: who else on the internet has been reaching that NAT target, and on which ports. It turns "the IOC visited" into "here's everyone who could".</p>
+
+<pre class="code">Syslog
+| where TimeGenerated &gt; ago(14d)
+| where SyslogMessage has "translated_dst_ip=&lt;internal-ip&gt;"
+| extend EventType = extract(@"\s(ip_flow_start|firewall)\s", 1, SyslogMessage),
+         Src   = extract(@"src=([\d\.]+)", 1, SyslogMessage),
+         DPort = extract(@"dport=(\d+)", 1, SyslogMessage)
+| where isnotempty(EventType)
+| summarize Flows = count(), Sources = dcount(Src), TopSources = make_set(Src, 20) by DPort, EventType</pre>
+
+<h2 class="head"><span class="num">07</span>What's still on the list</h2>
+<p class="sub">Closing the door isn't the same as checking the room.</p>
+
+<ul class="check">
+  <li>Review the archiver's admin and audit log for both visit windows: logins, failed logins, configuration changes.</li>
+  <li>Rotate the admin password. First check whether any scheduled report or script signs in with that account, or the rotation breaks it silently.</li>
+  <li>Scope TCP 25 to Exchange Online's published sending ranges instead of 0.0.0.0/0.</li>
+  <li>Block the IOC at the edge.</li>
+  <li>Re-run the exposure query after a week and confirm only port 25 traffic reaches the box.</li>
+  <li>Sweep every other 1:1 NAT on the firewall for the same "any / any" pattern.</li>
+</ul>
+
+<div class="analogy"><p class="tag">Mental model</p><p><strong>The TI match is a smoke alarm in the hallway.</strong> It tells you something burnt near a door. It can't tell you whether the door was locked. Only the raw log answers that, and here the door had been propped open for years for one delivery driver.</p></div>
+
+<div class="takeaway">
+  <p class="tag">The one-line model</p>
+  <p>A threat-intel match tells you an IP appeared in a log. Read the raw lines to learn whether a door was open, and before you shut it, find out who still needs to walk through.</p>
+</div>
+
+</div>
+</article>
+
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Ram Mudigina · Ground Truth</span>
+    <span><a href="/">Home</a> · <a href="/about.html">About</a></span>
+  </div>
+</footer>
+
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>
