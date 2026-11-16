@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>(function(){try{var t=localStorage.getItem('gt-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<script defer src="/assets/theme.js?v=1"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>You migrated the DNS. Did you migrate the registrar? — Ground Truth</title>
+<meta name="description" content="An entire acquired domain stopped receiving email and nothing in Microsoft 365 or the mail gateway was broken. The DNS had been migrated after the acquisition, but the registrar never was, so an outsider could still point the domain anywhere. How the trail went from one missing verification code to an empty DNS zone and an RDAP timestamp.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;680;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=33">
+<style>
+  figure.shot{margin:30px 0; padding:0}
+  figure.shot img{display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:10px; background:#fff}
+  figure.shot figcaption{margin-top:10px; font-family:var(--mono); font-size:12.5px; color:var(--ink-3); line-height:1.5}
+  figure.shot figcaption b{color:var(--ink-2)}
+  .tldr{border:1px solid var(--line); border-radius:8px; background:var(--bg-2); padding:6px 18px; margin:26px 0}
+  .tldr li{margin:10px 0; color:var(--ink-2)}
+  .tldr b{color:var(--ink)}
+  ul.check{list-style:none; padding-left:0}
+  ul.check li{padding-left:28px; position:relative; margin:9px 0; color:var(--ink-2)}
+  ul.check li:before{content:""; position:absolute; left:0; top:4px; width:15px; height:15px; border:1.5px solid var(--ink-3); border-radius:3px}
+  @media (max-width:640px){ .cmp{font-size:12.5px} .cmp th,.cmp td{padding:8px 9px; overflow-wrap:anywhere} }
+  .dl{display:inline-flex; align-items:center; font-family:var(--mono); font-size:13px; color:var(--accent);
+    border:1px solid var(--accent-dim); border-radius:9px; padding:11px 16px; text-decoration:none;
+    background:var(--signal-bg); margin:20px 0; transition:border-color .2s}
+  .dl:hover{border-color:var(--accent)}
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/">
+      <span class="mark">Ground <b>Truth</b></span>
+      <span class="tag">field notes · defensive security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/" aria-current="page">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/powershell/">PS</a>
+      <a href="/about.html">About</a>
+      <button class="kbtn" id="openPal" aria-label="Search">Search <kbd>⌘</kbd><kbd>K</kbd></button>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/email/">Email Security</a><span class="sep">›</span><a href="/email/delivery.html">Delivery &amp; mail flow</a></p>
+    <p class="eyebrow"><span class="dot"></span>Field case · DNS &amp; domain control</p>
+    <h1>You migrated the DNS. <em>Did you migrate the registrar?</em></h1>
+    <p class="lede">An entire acquired domain stopped receiving email, and nothing in Microsoft 365 or the mail gateway was broken. The DNS had been migrated after the acquisition, but the registrar never was, so someone outside the company could still point the domain wherever they liked. And they did.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>November 16, 2026</span>
+      <span>~10 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+<figure class="shot">
+  <picture><source srcset="/assets/img/acquired-domain-hero.webp" type="image/webp"><img src="/assets/img/acquired-domain-hero.png" alt="An envelope tied to a signpost. The signpost has been turned away from a full address book towards an empty one." width="791" height="446" loading="lazy"></picture>
+</figure>
+
+<div class="tldr">
+<ul>
+  <li><b>Symptom:</b> a user stopped getting payment-portal verification codes on one client's shared mailbox.</li>
+  <li><b>Real scope:</b> no external mail was reaching <em>any</em> address on the acquired domain.</li>
+  <li><b>Cause:</b> the domain's nameservers were switched at the registrar to an empty default DNS zone with no MX record.</li>
+  <li><b>Lesson:</b> after an acquisition, migrating DNS is not enough. Take control of the registrar too.</li>
+</ul>
+</div>
+
+<h2 class="head"><span class="num">01</span>The ticket</h2>
+<p class="sub">It arrived as a mailbox-linking request. One comment turned it into a domain-wide outage.</p>
+
+<p>A finance user handles accounts for several of the firm's clients. Each client has a shared mailbox on the acquired company's old domain (call it <span class="k">acquiredco.com</span>), and those mailboxes live in the parent firm's Microsoft 365 tenant.</p>
+
+<p>One payment portal sends its login verification codes to <span class="k">client@acquiredco.com</span>. For every other client this "just worked". For one client, the codes had stopped arriving. The ask: please link the old address to the new one.</p>
+
+<p>A day later the user added a comment: <em>"I guess this happens in all the clients."</em> That one line was the most important clue in the ticket.</p>
+
+<h2 class="head"><span class="num">02</span>Ruling out the usual suspects</h2>
+<p class="sub">If the gateway never saw the mail, the problem is in front of the gateway.</p>
+
+<p>My first theory was forwarding. The old domain looked like a separate system forwarding into the tenant, and forwarded mail from a sender with a strict DMARC policy often fails authentication and gets quarantined. That would fit "codes go missing".</p>
+
+<p>The evidence didn't support it:</p>
+<ul>
+  <li><strong>Exchange Online message trace</strong> for the client's mailbox showed normal traffic (invoices, reports, internal replies), all delivered. Nothing from the payment portal, and nothing relayed from the old domain.</li>
+  <li><strong>The secure email gateway</strong> (Proofpoint here) showed no quarantined or rejected copies of the codes either.</li>
+  <li><strong>A side quest:</strong> some external mail was in Exchange but not in the gateway search, which looked like a bypass. It wasn't. The Return-Path showed the original recipient was a <em>different alias</em> of the same mailbox, so my recipient filter simply didn't match.</li>
+</ul>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>Search by every address</h3><p>A mailbox answers to its primary address and every alias. Search the gateway by each of them, or by sender, before you conclude mail never arrived. Bulk senders often encode the original recipient in the Return-Path (<span class="k">bounces+…-user=domain@…</span>), which tells you which alias was used.</p></div>
+</div>
+
+<p>A broader gateway search on the whole acquired domain gave the real clue. Plenty of mail had been flowing to <span class="k">@acquiredco.com</span> addresses, and then it <strong>stopped completely, late on day 1</strong>. The gateway sits in front of everything, so the problem was before it.</p>
+
+<h2 class="head"><span class="num">03</span>The twist: the domain had no MX record</h2>
+<p class="sub">Ask the domain's own nameserver, not just your resolver.</p>
+
+<p>If mail isn't reaching the gateway, the next question is whether the world knows where to send it. A quick comparison against a healthy sister domain:</p>
+
+<pre class="code">Resolve-DnsName parentco.com -Type MX
+<b># 10 mxa-xxxx.pphosted.com, 10 mxb-xxxx.pphosted.com</b>
+
+Resolve-DnsName acquiredco.com -Type MX
+<b># only an SOA in the Authority section: the zone exists, but holds no MX</b></pre>
+
+<p>To rule out caching, I asked the domain's authoritative nameserver directly, then <span class="k">1.1.1.1</span> and <span class="k">8.8.8.8</span>. All three agreed.</p>
+
+<figure class="shot">
+  <picture><source srcset="/assets/img/acquired-domain-dns-compare.webp" type="image/webp"><img src="/assets/img/acquired-domain-dns-compare.png" alt="Healthy domain: nameservers on AWS Route 53, MX to the mail gateway, SPF and DKIM present, company DMARC policy. Broken domain: GoDaddy default nameservers, no MX, no SPF, DKIM missing, registrar-default DMARC." width="827" height="446" loading="lazy"></picture>
+  <figcaption><b>Same organisation, two domains.</b> The broken one had two default web A records and nothing else of the company's.</figcaption>
+</figure>
+
+<p>The DMARC row was the tell. It reported to the DNS provider's own address, which nobody at the firm would have set up. <strong>It was a freshly created default zone.</strong></p>
+
+<h2 class="head"><span class="num">04</span>RDAP: when it changed, and where</h2>
+<p class="sub">DNS tells you what the zone says now. The registry tells you what changed, and when.</p>
+
+<p>RDAP is the modern, JSON-speaking replacement for WHOIS. It's public and scriptable:</p>
+
+<pre class="code">(Invoke-RestMethod https://rdap.org/domain/acquiredco.com).events |
+  Select-Object eventAction, eventDate</pre>
+
+<p>The answer:</p>
+<ul>
+  <li><strong>last changed:</strong> day 0, mid-afternoon (UTC)</li>
+  <li><strong>nameservers:</strong> GoDaddy's default <span class="k">domaincontrol.com</span> pair</li>
+  <li><strong>registrar:</strong> a GoDaddy reseller</li>
+</ul>
+
+<p>The zone's SOA serial carried the same date. On day 0, someone with access to the registrar account had switched the domain's nameservers to GoDaddy's defaults, and GoDaddy had created an empty zone to serve.</p>
+
+<p><strong>Why mail kept flowing for about a day:</strong> resolvers had cached the old answers, and the <span class="k">.com</span> registry's nameserver records carry a long TTL. Senders kept using the old, correct DNS until their caches expired. The change was on day 0; users noticed on day 2.</p>
+
+<h2 class="head"><span class="num">05</span>Root cause: the DNS moved, the registrar didn't</h2>
+<p class="sub">Whoever holds the registrar decides where the domain points.</p>
+
+<p>I handed the evidence to the client's IT team, and they filled in the last piece within the hour. After the acquisition they had migrated the domain's DNS into their own AWS Route 53. But the <strong>registrar account had never been transferred</strong>. It still belonged to the acquired company's former IT administrator.</p>
+
+<figure class="shot">
+  <picture><source srcset="/assets/img/acquired-domain-registrar-gap.webp" type="image/webp"><img src="/assets/img/acquired-domain-registrar-gap.png" alt="Before migration, the registrar points to the old DNS host. After the DNS migration, the same registrar account, not transferred and still controlled by the old owner, points to AWS Route 53." width="1672" height="941" loading="lazy"></picture>
+  <figcaption><b>The gap.</b> The records moved to Route 53. Control of the signpost stayed with the old owner.</figcaption>
+</figure>
+
+<p>On day 0 he moved the domain back to GoDaddy DNS without copying any of the records. Changing nameservers doesn't move records; it only tells the world to look somewhere else. The somewhere else was empty.</p>
+
+<p>Nothing in Microsoft 365 was misconfigured. The gateway wasn't dropping anything. The mail simply had nowhere to go.</p>
+
+<div class="caveat">
+  <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+  <div><h3>This is a takeover path, not just an outage</h3><p>Here the new zone had no MX, so mail bounced. With one more record, it could have been delivered to a server of the outsider's choosing: verification codes and password resets included. Treat registrar control as a security control.</p></div>
+</div>
+
+<h2 class="head"><span class="num">06</span>How an email actually finds its way</h2>
+<p class="sub">Three things people lump together as "DNS".</p>
+
+<p><strong>Step 1, the lookup.</strong> The sender's mail server asks a resolver where to deliver mail for <span class="k">acquiredco.com</span>. The resolver asks, in turn:</p>
+<ol>
+  <li>the <strong>root servers</strong>, which refer it to the <span class="k">.com</span> registry;</li>
+  <li>the <strong><span class="k">.com</span> registry</strong>, which says "this domain's nameservers are <em>these</em>";</li>
+  <li><strong>those nameservers</strong> (the DNS host), which answer the MX question: deliver to the gateway.</li>
+</ol>
+<p><strong>Step 2, delivery.</strong> The sender connects to the gateway, which filters the message and hands it to Exchange Online, which delivers it to the mailbox.</p>
+
+<figure class="shot">
+  <picture><source srcset="/assets/img/acquired-domain-lookup-flow.webp" type="image/webp"><img src="/assets/img/acquired-domain-lookup-flow.png" alt="Step 1: sender mail server, DNS resolver, root servers, .com registry, DNS host (Route 53), result MX equals mail gateway. A dashed registrar box only changes the registry's answer. Step 2: sender mail server, mail gateway, Exchange Online, mailbox." width="781" height="435" loading="lazy"></picture>
+  <figcaption><b>The registrar is never asked during delivery.</b> In practice the resolver asks each server in turn and is referred to the next.</figcaption>
+</figure>
+
+<p>The <strong>registrar</strong> never appears in either step. It's the company that writes the nameserver entry into the registry. It only matters when someone changes that entry, and then it matters completely.</p>
+
+<div class="analogy"><p class="tag">Mental model</p><p><strong>The registrar is the signpost. The DNS host is the address book. The records are the pages.</strong> The firm had a complete address book in Route 53. Someone who still held the signpost turned it towards a blank book. The good book was still there; nobody was being sent to it.</p></div>
+
+<figure class="shot">
+  <picture><source srcset="/assets/img/acquired-domain-before-after.webp" type="image/webp"><img src="/assets/img/acquired-domain-before-after.png" alt="Before: the registrar signpost points to the Route 53 book with MX, SPF and DKIM, and mail reaches the mailbox. After day 0: the signpost points to a new default zone with no MX, mail bounces back, and the Route 53 book sits unused." width="811" height="458" loading="lazy"></picture>
+</figure>
+
+<h2 class="head"><span class="num">07</span>The fix, and checking it</h2>
+<p class="sub">One change, then verify the same way you diagnosed.</p>
+
+<p>Because the original Route 53 zone still existed, the fix was one change: point the nameservers back to it. Every record came back at once, with nothing to rebuild. The client's IT team arranged this with the former administrator and started a registrar transfer to their own account so it can't happen again.</p>
+
+<p>I didn't close the ticket on the user's word alone:</p>
+
+<pre class="code">Resolve-DnsName acquiredco.com -Type NS  -Server 8.8.8.8   <b># awsdns-* (Route 53)</b>
+Resolve-DnsName acquiredco.com -Type MX  -Server 8.8.8.8   <b># gateway pair is back</b>
+Resolve-DnsName acquiredco.com -Type TXT -Server 8.8.8.8 |
+  Where-Object Strings -like 'v=spf1*'                    <b># SPF is back</b></pre>
+
+<p>The user confirmed codes were arriving again. Codes sent while the domain had no MX were gone for good: senders' servers gave up and bounced them. Anything time-sensitive from that window had to be requested again.</p>
+
+<h2 class="head"><span class="num">08</span>An M&amp;A domain checklist</h2>
+<p class="sub">What to do for every domain that comes with an acquisition.</p>
+
+<ul class="check">
+  <li>Inventory every domain the acquired company owns, including old brands and typo domains.</li>
+  <li>For each one, record the registrar, the account owner, and who holds MFA on that account.</li>
+  <li>Transfer registrar control to the parent company, not just the DNS hosting.</li>
+  <li>Turn on registrar lock (transfer protection) and require MFA on the registrar account.</li>
+  <li>Remove former staff from the registrar account and rotate any shared credentials.</li>
+  <li>Alert on nameserver and MX changes. A scheduled RDAP and DNS check is enough to start with.</li>
+  <li>Decide each domain's future: keep, redirect or retire. Before retiring one, move every mailbox and every account-recovery address that still uses it.</li>
+</ul>
+
+<h2 class="head"><span class="num">09</span>The script</h2>
+<p class="sub">The checks above, packaged for the next time mail to a domain goes quiet.</p>
+
+<p><span class="k">Get-DnsMailEvidence.ps1</span> is read-only and needs no modules or admin rights. It queries MX, SPF, DMARC, DKIM, autodiscover, A, NS and SOA against each domain's authoritative nameserver plus <span class="k">8.8.8.8</span> and <span class="k">1.1.1.1</span>, side by side with healthy control domains. It then pulls registry RDAP data (last changed, delegated nameservers, registrar) and writes a text report, a CSV and the raw RDAP JSON, ready to attach to a handover.</p>
+
+<pre class="code">.\Get-DnsMailEvidence.ps1
+<b># prompts for domains (problem domain first) and an optional ticket number</b>
+
+.\Get-DnsMailEvidence.ps1 -Domains problem.com,working.com -Ticket INC0000000</pre>
+
+<a class="dl" href="/assets/scripts/Get-DnsMailEvidence.ps1" download>&#8681;&nbsp; Download Get-DnsMailEvidence.ps1</a>
+
+<div class="takeaway">
+  <p class="tag">The one-line model</p>
+  <p>Whoever holds the registrar decides where the domain points, and therefore where its mail goes. Migrate the registrar, not just the DNS.</p>
+</div>
+
+<div class="sources">
+<h2>Sources &amp; further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/powershell/module/dnsclient/resolve-dnsname">Resolve-DnsName</a><span>querying specific record types against a chosen server</span></li>
+  <li><a href="https://about.rdap.org/">About RDAP</a><span>what RDAP is and how rdap.org redirects to the right registry</span></li>
+  <li><a href="https://www.rfc-editor.org/rfc/rfc9083">RFC 9083: RDAP JSON responses</a><span>the events and nameserver fields used here</span></li>
+  <li><a href="https://learn.microsoft.com/en-us/microsoft-365/enterprise/external-domain-name-system-records">External DNS records for Microsoft 365</a><span>the MX, SPF, DKIM and autodiscover records a domain needs</span></li>
+  <li><a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/domain-transfer-to-route-53.html">Transferring a domain registration to Route 53</a><span>moving the registrar, not just the DNS</span></li>
+</ul>
+</div>
+
+<p class="disclaimer">Anonymised from real support work. Client, domain, people and ticket details have been changed; the investigation, the evidence and the fix are real.</p>
+
+</div>
+</article>
+
+<div class="connect">
+<div class="row"><span class="lab">Filed under</span><a class="lk" href="/email/delivery.html"><div class="t">Email Security › Delivery &amp; mail flow</div><div class="d">Browse this part of the knowledge base.</div></a></div>
+<div class="row"><span class="lab">Related</span><div class="grid2"><a class="lk" href="/posts/email-delivery.html"><div class="t">The bounce that lied: when &ldquo;Delivered&rdquo; isn’t delivered</div><div class="d">Email Security · Delivery &amp; mail flow</div></a><a class="lk" href="/posts/restricted-from-sending-nobody-hit-the-limit.html"><div class="t">Restricted from sending, nobody hit the limit</div><div class="d">Email Security · Outbound security</div></a></div></div>
+</div>
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer><div class="wrap">
+  <span>© 2026 Ram Mudigina · Ground Truth</span>
+  <span><a href="/">Home</a> · <a href="/email/">Email</a> · <a href="https://www.linkedin.com/in/ram-mudigina/">LinkedIn</a></span>
+</div></footer>
+
+<div class="pal-back" id="palBack">
+  <div class="pal-dialog" role="dialog" aria-label="Search field notes">
+    <div class="pal-top"><span class="ps">PS&gt;</span>
+      <input id="palInput" placeholder="Get-FieldNote -Match … (try: TAP, KQL, PIM)" autocomplete="off"></div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+  </div>
+</div>
+<div class="progress" id="progress"></div>
+<script src="/assets/blueteam.js?v=29" defer></script>
+</body>
+</html>
