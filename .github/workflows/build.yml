@@ -1,0 +1,30 @@
+name: Build listings
+# Regenerates section lists, counts, the home recent list and search-index
+# from posts/ whenever a post changes. The bot's own commit touches none of
+# the trigger paths, so it never re-triggers itself.
+on:
+  push:
+    paths:
+      - 'posts/**'
+      - 'assets/search-extra.json'
+      - 'build.mjs'
+permissions:
+  contents: write
+concurrency: build-listings
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node build.mjs
+      - name: Commit regenerated listings
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "Rebuild listings [skip ci]"
+          git push

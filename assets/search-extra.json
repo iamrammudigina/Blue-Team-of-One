@@ -1,0 +1,13 @@
+[
+ {
+  "sord": 39,
+  "entry": {
+   "url": "/detection/kql-library.html",
+   "title": "KQL Library",
+   "excerpt": "A living, filterable library of investigation KQL for Microsoft Sentinel and Defender — grouped by hunt category (identity and sign-ins, email and collaboration, endpoint, persistence, cloud and exfil, Intune), each with what it finds, when to run it, and the gotcha. Copy, run, tune to your tenant.",
+   "vertical": "Detection Engineering",
+   "section": "KQL Library",
+   "text": "KQL Library investigation queries for Microsoft Sentinel and Defender, the twin to the PowerShell Library. Categories: identity and sign-ins including many failures then a success password spray, successful legacy auth MFA bypass, impossible travel two countries; email and collaboration including inbox rule that hides or forwards mail BEC, sudden mass external send; endpoint including encoded or hidden PowerShell, Office app spawning a shell LOLBin; persistence including new secret added to an app or service principal, someone added to a privileged role; cloud and exfil including OAuth app consent illicit consent phishing, bulk file downloads staging exfil; Intune including config change out of hours, devices falling out of compliance. Each query lists what it finds, when to run it, and the gotcha, filterable by category and searchable by keyword. Copy run tune to your tenant."
+  }
+ }
+]
