@@ -3,7 +3,7 @@
 <head>
 <script>(function(){try{var t=localStorage.getItem('gt-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <script defer src="/assets/theme.js?v=1"></script>
-<script type="application/json" id="gt-meta">{"vertical": "cloud", "section": "posture", "fmtc": "deep", "fmt": "Field case", "date": "2026-11-18", "title": "A pre-staged outage greeting for a Teams auto attendant", "teaser": "A DR plan asked three &ldquo;five-minute&rdquo; questions about the main phone number. Each needed a check first: authorized users who can change nothing, a holiday dated in the past as an off switch, and the honest answer on Calling Plan failover.", "ord": 2, "stitle": "Pre-staged outage greeting for a Teams auto attendant", "excerpt": "A client updating its disaster recovery plan asked who administers the Teams auto attendant on its main toll-free number, whether an outage greeting can be ready in advance, and whether the number survives a Microsoft 365 outage. The checks, the holiday-dated-in-the-past switch, and what a Calling Plan number can and can't do.", "text": "Teams Phone auto attendant disaster recovery planning for a main toll-free number. Authorized users listed on an auto attendant can change nothing unless a Teams voice applications policy (TeamsVoiceApplicationsPolicy) grants permissions; the Global and Tag:Default policies allow nothing, and ex-employees were still listed. Get-CsAutoAttendant, Get-CsOnlineApplicationInstance, Get-CsPhoneNumberAssignment NumberType CallingPlan versus OperatorConnect or DirectRouting, Get-CsOnlineSchedule. Outage greeting pre-staged as a holiday schedule called Outage dated in the past so it never triggers, linked to a holiday call flow with a text-to-speech greeting; holiday call handling takes priority over business hours; switch on by moving the date range to now, off by moving it back. Greeting-only voice applications policy (AllowAutoAttendantBusinessHoursGreetingChange, AfterHours, Holiday greeting change) so the client can edit greetings without Teams Premium; changing holiday dates as an authorized user needs Teams Premium. Microsoft Calling Plan number: client-side outages (office internet, servers, AWS) do not affect it and staff answer on the Teams mobile app; a Teams calling outage takes the number and the greeting down with no automatic fallback; carrier forwarding needs Operator Connect or Direct Routing. Gotchas: PIM Teams Administrator activation returned Access Denied on every write cmdlet for minutes after reconnect while the Teams admin center worked; reads work without the role; JSON backup stores enums as numbers so compare menu options as JSON; the admin center tidies text-to-speech punctuation. Validation read-back and a real test call.", "vlabel": "Cloud Security", "slabel": "Cloud posture", "sord": 43}</script>
+<script type="application/json" id="gt-meta">{"vertical": "cloud", "section": "posture", "fmtc": "deep", "fmt": "Field case", "date": "2026-11-18", "title": "A pre-staged outage greeting for a Teams auto attendant", "teaser": "A DR plan asked three &ldquo;five-minute&rdquo; questions about the main phone number. Each needed a check first: authorized users who can change nothing, a holiday dated in the past as an off switch, and the honest answer on Calling Plan failover.", "ord": 2, "stitle": "Pre-staged outage greeting for a Teams auto attendant", "excerpt": "A client updating its disaster recovery plan asked who administers the Teams auto attendant on its main toll-free number, whether an outage greeting can be ready in advance, and whether the number survives a Microsoft 365 outage. The checks, the holiday-dated-in-the-past switch, and what a Calling Plan number can and can't do.", "text": "Teams Phone auto attendant disaster recovery planning for a main toll-free number. Authorized users listed on an auto attendant can change nothing unless a Teams voice applications policy (TeamsVoiceApplicationsPolicy) grants permissions; the Global and Tag:Default policies allow nothing, and ex-employees were still listed. Get-CsAutoAttendant, Get-CsOnlineApplicationInstance, Get-CsPhoneNumberAssignment NumberType CallingPlan versus OperatorConnect or DirectRouting, Get-CsOnlineSchedule. Outage greeting pre-staged as a holiday schedule called Outage dated in the past so it never triggers, linked to a holiday call flow with a text-to-speech greeting; holiday call handling takes priority over business hours; switch on by moving the date range to now, off by moving it back. Greeting-only voice applications policy (AllowAutoAttendantBusinessHoursGreetingChange, AfterHours, Holiday greeting change) so the client can edit greetings without Teams Premium; changing holiday dates as an authorized user needs Teams Premium. Microsoft Calling Plan number: client-side outages (office internet, servers, AWS) do not affect it and staff answer on the Teams mobile app; a Teams calling outage takes the number and the greeting down with no automatic fallback; carrier forwarding needs Operator Connect or Direct Routing. Gotchas: PIM Teams Administrator activation returned Access Denied on every write cmdlet for minutes after reconnect while the Teams admin center worked; reads work without the role; JSON backup stores enums as numbers so compare menu options as JSON; the admin center tidies text-to-speech punctuation. Validation read-back and a real test call. Shared voicemail to a Microsoft 365 group: SharedVoicemail target with transcription, members must be subscribers (Add-UnifiedGroupLinks -LinkType Subscribers), AutoSubscribeNewMembers, group creator becomes owner and member. AuthorizedUsers is a fixed array, Collection was of a fixed size. Set-CsAutoAttendant cannot contain multiple call flows with the same ID or name. After-hours DR test with a voicemail.", "vlabel": "Cloud Security", "slabel": "Cloud posture", "sord": 43}</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>A pre-staged outage greeting for a Teams auto attendant — Ground Truth</title>
@@ -98,7 +98,7 @@ Get-CsPhoneNumberAssignment -TelephoneNumber &lt;+1888...&gt; |
   <p class="sub">Teams has no outage switch, so we built one out of holiday call handling.</p>
 
   <p>Holiday call handling takes priority over business hours whenever a holiday's date range covers the current time. That's the whole mechanism.</p>
-  <p>So the switch is a holiday called <span class="k">Outage</span>, dated to a day that has already passed. It's linked to its own call flow, which plays the outage greeting and then hands off. Because the date is in the past, it never triggers. To turn it on, you move the date range to now. To turn it off, you move it back. It takes effect in minutes, and the normal business hours menu is never touched.</p>
+  <p>So the switch is a holiday called <span class="k">Outage</span>, dated to a day that has already passed. It's linked to its own call flow, which plays the outage greeting and then sends the caller to a shared voicemail. Because the date is in the past, it never triggers. To turn it on, you move the date range to now. To turn it off, you move it back. It takes effect in minutes, and the normal business hours menu is never touched.</p>
 
 <figure class="diagram">
 <div class="scroll">
@@ -121,7 +121,7 @@ Get-CsPhoneNumberAssignment -TelephoneNumber &lt;+1888...&gt; |
 
   <rect x="40" y="118" width="172" height="64" rx="10" fill="#2a1416" stroke="#F76F72" stroke-width="1.3"/>
   <text class="h" x="56" y="142">Outage greeting</text>
-  <text class="s" x="56" y="164">then hands off</text>
+  <text class="s" x="56" y="164">then shared voicemail</text>
   <text class="m r" x="40" y="206">OFF: dated in the past</text>
   <text class="m g" x="40" y="224">ON:  move range to now</text>
 
@@ -150,7 +150,22 @@ Get-CsPhoneNumberAssignment -TelephoneNumber &lt;+1888...&gt; |
   <p>We kept <strong>one generic message</strong> rather than a greeting per scenario. Callers don't need to know whether it's the network, the servers or an application. They need to hear that there's a problem and what happens next:</p>
   <p class="greeting">"Thank you for calling. We're currently experiencing a technical issue and some services may be unavailable. Please leave a message and we'll get back to you as soon as possible."</p>
 
-  <p>For the "who can change it" part, the client's technology lead was added as an authorized user, with a new voice applications policy that allows greeting changes and nothing else: business hours, after hours and holiday greetings. Changing greetings this way needs no Teams Premium. Changing <em>holiday dates</em> as an authorized user does, so switching the outage holiday on stays with the admins.</p>
+  <p>The voicemail goes to a Microsoft 365 group that holds only the people on the outage list, set as the auto attendant's <span class="k">SharedVoicemail</span> target with transcription on. Each person gets the message and transcript in their own inbox, so nobody has to remember to check a group mailbox in the middle of an outage. That only happens if they're <i>subscribers</i>, not just members:</p>
+
+<pre class="code"><span class="cm"># Outage voicemail group: members AND subscribers, hidden from the address book</span>
+New-UnifiedGroup -DisplayName "Outage Voicemail" -Alias outage-voicemail `
+        -AccessType Private -Members $people
+Set-UnifiedGroup outage-voicemail -HiddenFromAddressListsEnabled $true `
+        -AutoSubscribeNewMembers:$true
+Add-UnifiedGroupLinks outage-voicemail -LinkType Subscribers -Links $people
+
+<span class="cm"># Point the outage call flow at it</span>
+$vm = New-CsAutoAttendantCallableEntity -Identity $groupId -Type SharedVoicemail `
+        -EnableTranscription -EnableSharedVoicemailSystemPromptSuppression</pre>
+
+<p>A separate, shorter list says who may ask the admins to switch the greeting on. Both lists go in the DR plan.</p>
+
+<p>For the "who can change it" part, the client's technology lead was added as an authorized user, with a new voice applications policy that allows greeting changes and nothing else: business hours, after hours and holiday greetings. Changing greetings this way needs no Teams Premium. Changing <em>holiday dates</em> as an authorized user does, so switching the outage holiday on stays with the admins.</p>
 
   <h2 class="head"><span class="num">03</span>The honest answer on failover</h2>
   <p class="sub">A Calling Plan number lives in Microsoft's cloud. That cuts both ways.</p>
@@ -195,6 +210,10 @@ Get-CsPhoneNumberAssignment -TelephoneNumber &lt;+1888...&gt; |
   <tr><td>Every write cmdlet returned <span class="k">Access Denied</span>, even after a reconnect</td><td>Teams Administrator had just been activated through PIM and hadn't reached Teams yet; reads work without it, so a read proves nothing</td><td>The Teams admin center worked first. Or wait 10–15 minutes and reconnect in a fresh window</td></tr>
   <tr><td>Backup and live menu look different when nothing changed</td><td>A JSON backup stores enums as numbers: <span class="k">Tone1 = TransferCallToTarget</span> becomes <span class="k">1 = 2</span></td><td>Compare both sides as JSON, not as printed values</td></tr>
   <tr><td>Greeting text isn't quite what was approved</td><td>The admin center tidies text-to-speech punctuation</td><td>Read back the exact text if the wording matters to the client</td></tr>
+  <tr><td>Voicemail reaches the group mailbox but nobody's inbox</td><td>Group members aren't subscribers by default, and <span class="k">-AutoSubscribeNewMembers</span> didn't stick on a group seconds old</td><td>Add the members as <span class="k">Subscribers</span>, set auto-subscribe again, and read both back</td></tr>
+  <tr><td>The admin who built it starts getting the client's outage voicemails</td><td>Whoever creates a group becomes its owner and a member</td><td>Make a client contact the owner, then remove yourself as owner and member</td></tr>
+  <tr><td><span class="k">Collection was of a fixed size</span> when removing an authorized user</td><td><span class="k">AuthorizedUsers</span> is a fixed array, so <span class="k">.Remove()</span> and <span class="k">.Clear()</span> fail</td><td>Assign a filtered copy: <span class="k">$aa.AuthorizedUsers = [guid[]]@($aa.AuthorizedUsers | ? { $_ -ne $id })</span></td></tr>
+  <tr><td><span class="k">Set-CsAutoAttendant</span>: cannot contain multiple call flows with the same ID or name</td><td>An <span class="k">Outage</span> call flow was already on the auto attendant from earlier staging; the new one had the same name</td><td>List <span class="k">CallFlows</span> first. If the flow exists, change its greeting and menu in place instead of adding another</td></tr>
 </table>
 
 <pre class="code"><span class="cm"># Default menu unchanged? Compare like for like.</span>
@@ -203,7 +222,7 @@ $now    = $aa.DefaultCallFlow.Menu.MenuOptions  | ConvertTo-Json -Depth 10 -Comp
 $before -eq $now   <span class="cm"># True = keys, actions and targets all match</span></pre>
 
   <h2 class="head"><span class="num">05</span>Validate, then call it</h2>
-  <p class="sub">Six read-only checks, then one real phone call.</p>
+  <p class="sub">Seven read-only checks, then two real phone calls.</p>
 
   <ol>
     <li>Authorized users, and the policy each one actually has</li>
@@ -211,13 +230,14 @@ $before -eq $now   <span class="cm"># True = keys, actions and targets all match
     <li>The holiday association is on the auto attendant</li>
     <li>The Outage schedule's date range is in the past, so it's off</li>
     <li>The outage call flow carries the approved greeting and action</li>
+    <li>The voicemail target is the outage group, type <span class="k">SharedVoicemail</span>, transcription on, and every person on the list is a subscriber</li>
     <li>The default menu matches the pre-change backup</li>
   </ol>
-  <p>Then call the number and hear the normal greeting. That's the test that settles it.</p>
+  <p>Then call the number and hear the normal greeting. For the DR plan's annual test, do it once more after hours: switch the outage greeting on, call in and leave a voicemail, confirm it lands in every inbox on the list with a transcript, then switch it off and call again. Screenshots of each step are the test evidence.</p>
 
   <div class="caveat">
     <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
-    <div><h3>Back up before you touch it</h3><p>Export the auto attendant with <span class="k">Get-CsAutoAttendant | ConvertTo-Json -Depth 15</span> before the change. It's the only way check 6 has something to compare against, and the only record of how the live menu was wired if something goes wrong.</p></div>
+    <div><h3>Back up before you touch it</h3><p>Export the auto attendant with <span class="k">Get-CsAutoAttendant | ConvertTo-Json -Depth 15</span> before the change. It's the only way check 7 has something to compare against, and the only record of how the live menu was wired if something goes wrong.</p></div>
   </div>
 
 <div class="sources">
