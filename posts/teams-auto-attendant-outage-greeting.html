@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>(function(){try{var t=localStorage.getItem('gt-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<script defer src="/assets/theme.js?v=1"></script>
+<script type="application/json" id="gt-meta">{"vertical": "cloud", "section": "posture", "fmtc": "deep", "fmt": "Field case", "date": "2026-11-18", "title": "A pre-staged outage greeting for a Teams auto attendant", "teaser": "A DR plan asked three &ldquo;five-minute&rdquo; questions about the main phone number. Each needed a check first: authorized users who can change nothing, a holiday dated in the past as an off switch, and the honest answer on Calling Plan failover.", "ord": 2, "stitle": "Pre-staged outage greeting for a Teams auto attendant", "excerpt": "A client updating its disaster recovery plan asked who administers the Teams auto attendant on its main toll-free number, whether an outage greeting can be ready in advance, and whether the number survives a Microsoft 365 outage. The checks, the holiday-dated-in-the-past switch, and what a Calling Plan number can and can't do.", "text": "Teams Phone auto attendant disaster recovery planning for a main toll-free number. Authorized users listed on an auto attendant can change nothing unless a Teams voice applications policy (TeamsVoiceApplicationsPolicy) grants permissions; the Global and Tag:Default policies allow nothing, and ex-employees were still listed. Get-CsAutoAttendant, Get-CsOnlineApplicationInstance, Get-CsPhoneNumberAssignment NumberType CallingPlan versus OperatorConnect or DirectRouting, Get-CsOnlineSchedule. Outage greeting pre-staged as a holiday schedule called Outage dated in the past so it never triggers, linked to a holiday call flow with a text-to-speech greeting; holiday call handling takes priority over business hours; switch on by moving the date range to now, off by moving it back. Greeting-only voice applications policy (AllowAutoAttendantBusinessHoursGreetingChange, AfterHours, Holiday greeting change) so the client can edit greetings without Teams Premium; changing holiday dates as an authorized user needs Teams Premium. Microsoft Calling Plan number: client-side outages (office internet, servers, AWS) do not affect it and staff answer on the Teams mobile app; a Teams calling outage takes the number and the greeting down with no automatic fallback; carrier forwarding needs Operator Connect or Direct Routing. Gotchas: PIM Teams Administrator activation returned Access Denied on every write cmdlet for minutes after reconnect while the Teams admin center worked; reads work without the role; JSON backup stores enums as numbers so compare menu options as JSON; the admin center tidies text-to-speech punctuation. Validation read-back and a real test call.", "vlabel": "Cloud Security", "slabel": "Cloud posture", "sord": 43}</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A pre-staged outage greeting for a Teams auto attendant — Ground Truth</title>
+<meta name="description" content="Three 'five-minute' DR questions about a Teams auto attendant on a main phone number, and the checks each needed: authorized users who can change nothing, a holiday dated in the past as an outage switch, and the honest answer on Calling Plan failover.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;680;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/style.css?v=33">
+<style>
+  figure.diagram{margin:30px 0; padding:0}
+  figure.diagram .scroll{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  figure.diagram svg{display:block; width:100%; min-width:640px; height:auto;
+    background:#0A1E42; border:1px solid #1E3E70; border-radius:10px}
+  figure.diagram figcaption{margin-top:10px; font-family:var(--mono); font-size:12.5px; color:var(--ink-3); line-height:1.5}
+  figure.diagram figcaption b{color:var(--ink-2)}
+  .dg .lab{font-family:var(--mono); font-size:10.5px; letter-spacing:.08em; fill:#7C8DB3}
+  .dg .h{font-family:var(--mono); font-size:13px; font-weight:700; fill:#EAEEF6}
+  .dg .b{font-family:var(--sans); font-size:12.5px; fill:#B7C4DD}
+  .dg .s{font-family:var(--sans); font-size:11.5px; fill:#7C8DB3}
+  .dg .m{font-family:var(--mono); font-size:11px; fill:#B7C4DD}
+  .greeting{border-left:3px solid var(--line); padding:4px 0 4px 18px; margin:22px 0; font-style:italic; color:var(--ink-2)}
+  .dg .g{fill:#6FD08C} .dg .a{fill:#F2D45C} .dg .r{fill:#F76F72}
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="site-head-inner">
+    <a class="masthead" href="/index.html">
+      <span class="mark">Ground <b>Truth</b></span>
+      <span class="tag">field notes · defensive security</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/soc/">SOC</a>
+      <a href="/ir/">IR</a>
+      <a href="/identity/">Identity</a>
+      <a href="/endpoint/">Endpoint</a>
+      <a href="/email/">Email</a>
+      <a href="/detection/">Detection</a>
+      <a href="/cloud/">Cloud</a>
+      <a href="/forensics/">Forensics</a>
+      <a href="/about.html">About</a>
+      <a href="/search.html">Search</a>
+    </nav>
+  </div>
+</header>
+
+<header class="hero">
+  <div class="hero-inner">
+    <p class="crumb"><a href="/">Home</a><span class="sep">›</span><a href="/cloud/">Cloud Security</a><span class="sep">›</span><a href="/cloud/posture.html">Cloud posture</a></p>
+    <p class="eyebrow"><span class="dot"></span>Field case · Teams Phone · DR planning</p>
+    <h1>A pre-staged outage greeting for a <em>Teams auto attendant</em></h1>
+    <p class="lede">A disaster recovery plan asked three questions about the company's main phone number. Each one sounded like a five-minute answer, and each one needed a check first. Here's what the checks found, the holiday-dated-in-the-past trick that gives you an outage switch, and the honest answer on failover.</p>
+    <div class="byline">
+      <span><b>Ram Mudigina</b></span>
+      <span>November 18, 2026</span>
+      <span>~6 min read</span>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="wrap">
+
+  <p>A client's director of technology was updating their disaster recovery plan and sent three questions about the company's main toll-free number, which runs through a Teams auto attendant:</p>
+  <ol>
+    <li>Who administers it, and who can change its greeting?</li>
+    <li>Can we have an outage greeting ready ahead of time, and what does switching it on involve?</li>
+    <li>If Microsoft 365 goes down, does the number go down with it?</li>
+  </ol>
+  <p>All three sound like five-minute answers. None of them should be answered from memory, because each one depends on how <em>this</em> tenant is set up.</p>
+
+  <h2 class="head"><span class="num">01</span>Check before you answer</h2>
+  <p class="sub">Two read-only lookups changed what we told the client.</p>
+
+  <p><strong>Who can change it.</strong> The auto attendant listed two authorized users. Both had left the company. That looks like a problem, but neither had a voice applications policy assigned, and the tenant only had the <span class="k">Global</span> and <span class="k">Tag:Default</span> policies, with every permission set to False. So in practice the listed users couldn't change anything, and nobody on the client side could either.</p>
+  <p>Being listed as an authorized user means nothing on its own. The <span class="k">TeamsVoiceApplicationsPolicy</span> is what grants the permissions.</p>
+
+  <p><strong>What the number actually is.</strong> The number type decides the whole failover answer, so look it up rather than assume it:</p>
+
+<pre class="code"><span class="cm"># Which resource account and number sit behind the auto attendant</span>
+(Get-CsAutoAttendant -Identity &lt;aa-id&gt;).ApplicationInstances |
+  % { Get-CsOnlineApplicationInstance -Identity $_ | Select DisplayName, PhoneNumber }
+
+<span class="cm"># CallingPlan, OperatorConnect or DirectRouting?</span>
+Get-CsPhoneNumberAssignment -TelephoneNumber &lt;+1888...&gt; |
+  Select TelephoneNumber, NumberType, PstnPartnerName, ActivationState</pre>
+
+  <p>It came back <span class="k">CallingPlan</span>, with Microsoft as the partner.</p>
+
+  <h2 class="head"><span class="num">02</span>The outage greeting: a holiday dated in the past</h2>
+  <p class="sub">Teams has no outage switch, so we built one out of holiday call handling.</p>
+
+  <p>Holiday call handling takes priority over business hours whenever a holiday's date range covers the current time. That's the whole mechanism.</p>
+  <p>So the switch is a holiday called <span class="k">Outage</span>, dated to a day that has already passed. It's linked to its own call flow, which plays the outage greeting and then hands off. Because the date is in the past, it never triggers. To turn it on, you move the date range to now. To turn it off, you move it back. It takes effect in minutes, and the normal business hours menu is never touched.</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="An incoming call is checked against holiday schedules first. If the Outage holiday's date range covers now, the caller hears the outage greeting. Otherwise business hours decide between the normal menu and the after-hours flow. The Outage holiday is off while its date is in the past and switched on by moving its date range to now.">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#7C8DB3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  </defs>
+  <text class="lab" x="24" y="28">HOLIDAY HANDLING IS CHECKED FIRST</text>
+
+  <rect x="290" y="46" width="140" height="40" rx="10" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h" x="360" y="71" text-anchor="middle">Incoming call</text>
+  <line x1="360" y1="86" x2="360" y2="108" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+
+  <polygon points="260,150 360,110 460,150 360,190" fill="#241F0C" stroke="#F2D45C" stroke-width="1.2"/>
+  <text class="h" x="360" y="148" text-anchor="middle">Outage holiday</text>
+  <text class="s a" x="360" y="166" text-anchor="middle">date covers now?</text>
+
+  <line x1="260" y1="150" x2="214" y2="150" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+  <text class="m a" x="238" y="140" text-anchor="middle">yes</text>
+
+  <rect x="40" y="118" width="172" height="64" rx="10" fill="#2a1416" stroke="#F76F72" stroke-width="1.3"/>
+  <text class="h" x="56" y="142">Outage greeting</text>
+  <text class="s" x="56" y="164">then hands off</text>
+  <text class="m r" x="40" y="206">OFF: dated in the past</text>
+  <text class="m g" x="40" y="224">ON:  move range to now</text>
+
+  <line x1="360" y1="190" x2="360" y2="220" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+  <text class="m" x="372" y="210">no</text>
+
+  <rect x="280" y="222" width="160" height="44" rx="10" fill="#1A1640" stroke="#b79bff" stroke-width="1.2"/>
+  <text class="h" x="360" y="249" text-anchor="middle">Business hours?</text>
+
+  <path d="M360 266 V284 H250 V302" fill="none" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+  <path d="M360 284 H470 V302" fill="none" stroke="#7C8DB3" stroke-width="1.4" marker-end="url(#a1)"/>
+  <text class="m" x="290" y="278">open</text>
+  <text class="m" x="404" y="278">closed</text>
+
+  <rect x="160" y="304" width="180" height="44" rx="10" fill="#0C2417" stroke="#6FD08C" stroke-width="1.2"/>
+  <text class="h" x="250" y="324" text-anchor="middle">Normal menu</text>
+  <text class="s" x="250" y="340" text-anchor="middle">sales, research, operator</text>
+  <rect x="380" y="304" width="180" height="44" rx="10" fill="#0C244C" stroke="#2a4f86"/>
+  <text class="h" x="470" y="324" text-anchor="middle">After-hours flow</text>
+  <text class="s" x="470" y="340" text-anchor="middle">unchanged</text>
+</svg>
+</div>
+<figcaption><b>The switch is a date, not a setting.</b> The Outage holiday sits ahead of business hours in the routing order. Dated in the past, it never matches, so callers go through the normal menu exactly as before.</figcaption>
+</figure>
+
+  <p>We kept <strong>one generic message</strong> rather than a greeting per scenario. Callers don't need to know whether it's the network, the servers or an application. They need to hear that there's a problem and what happens next:</p>
+  <p class="greeting">"Thank you for calling. We're currently experiencing a technical issue and some services may be unavailable. Please leave a message and we'll get back to you as soon as possible."</p>
+
+  <p>For the "who can change it" part, the client's technology lead was added as an authorized user, with a new voice applications policy that allows greeting changes and nothing else: business hours, after hours and holiday greetings. Changing greetings this way needs no Teams Premium. Changing <em>holiday dates</em> as an authorized user does, so switching the outage holiday on stays with the admins.</p>
+
+  <h2 class="head"><span class="num">03</span>The honest answer on failover</h2>
+  <p class="sub">A Calling Plan number lives in Microsoft's cloud. That cuts both ways.</p>
+
+<figure class="diagram">
+<div class="scroll">
+<svg class="dg" viewBox="0 0 720 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two columns. Left, the number keeps answering through client-side outages: office internet, on-prem or cloud servers, and line-of-business applications, with staff taking calls on the Teams mobile app. Right, the number goes down during a Teams calling outage: no automatic fallback, and the pre-staged greeting does not play either.">
+  <text class="lab" x="24" y="28">WHAT THE NUMBER SURVIVES</text>
+
+  <rect x="24" y="46" width="324" height="164" rx="10" fill="#0C2417" stroke="#6FD08C" stroke-width="1.3"/>
+  <text class="h g" x="44" y="74">Keeps answering</text>
+  <text class="b" x="44" y="102">Office internet down</text>
+  <text class="b" x="44" y="124">Servers or cloud estate down</text>
+  <text class="b" x="44" y="146">Business applications down</text>
+  <text class="s" x="44" y="178">Staff take calls on the Teams</text>
+  <text class="s" x="44" y="194">mobile app; the outage greeting can play</text>
+
+  <rect x="372" y="46" width="324" height="164" rx="10" fill="#2a1416" stroke="#F76F72" stroke-width="1.3"/>
+  <text class="h r" x="392" y="74">Goes down</text>
+  <text class="b" x="392" y="102">Teams calling service outage</text>
+  <text class="s" x="392" y="130">No automatic fallback on a Calling Plan</text>
+  <text class="s" x="392" y="152">The pre-staged greeting runs on the</text>
+  <text class="s" x="392" y="168">same service, so it won't play either</text>
+  <text class="s" x="392" y="194">Carrier forwarding needs Operator Connect</text>
+</svg>
+</div>
+<figcaption><b>The greeting is for your outages, not Microsoft's.</b> Everything on the left is where it earns its keep. On the right, nothing hosted in Teams can help.</figcaption>
+</figure>
+
+  <p>We wrote that into the DR plan as it stands. The plan doesn't promise a fallback that doesn't exist, and it didn't turn into a pitch for re-architecting the line. If the client later wants carrier-side forwarding, that's a separate decision with its own cost.</p>
+
+  <div class="takeaway">
+    <p class="tag">The one-line model</p>
+    <p>A holiday dated in the past is an outage switch you can flip in minutes, but it only helps while Teams itself is up. Say both halves in the DR plan.</p>
+  </div>
+
+  <h2 class="head"><span class="num">04</span>Gotchas from the build</h2>
+  <p class="sub">None of these are in the docs' happy path.</p>
+
+<table class="cmp">
+  <tr><th>Symptom</th><th>Root cause</th><th>Fix</th></tr>
+  <tr><td>Every write cmdlet returned <span class="k">Access Denied</span>, even after a reconnect</td><td>Teams Administrator had just been activated through PIM and hadn't reached Teams yet; reads work without it, so a read proves nothing</td><td>The Teams admin center worked first. Or wait 10–15 minutes and reconnect in a fresh window</td></tr>
+  <tr><td>Backup and live menu look different when nothing changed</td><td>A JSON backup stores enums as numbers: <span class="k">Tone1 = TransferCallToTarget</span> becomes <span class="k">1 = 2</span></td><td>Compare both sides as JSON, not as printed values</td></tr>
+  <tr><td>Greeting text isn't quite what was approved</td><td>The admin center tidies text-to-speech punctuation</td><td>Read back the exact text if the wording matters to the client</td></tr>
+</table>
+
+<pre class="code"><span class="cm"># Default menu unchanged? Compare like for like.</span>
+$before = $bak.DefaultCallFlow.Menu.MenuOptions | ConvertTo-Json -Depth 10 -Compress
+$now    = $aa.DefaultCallFlow.Menu.MenuOptions  | ConvertTo-Json -Depth 10 -Compress
+$before -eq $now   <span class="cm"># True = keys, actions and targets all match</span></pre>
+
+  <h2 class="head"><span class="num">05</span>Validate, then call it</h2>
+  <p class="sub">Six read-only checks, then one real phone call.</p>
+
+  <ol>
+    <li>Authorized users, and the policy each one actually has</li>
+    <li>The policy's permissions: only the three greeting changes are True</li>
+    <li>The holiday association is on the auto attendant</li>
+    <li>The Outage schedule's date range is in the past, so it's off</li>
+    <li>The outage call flow carries the approved greeting and action</li>
+    <li>The default menu matches the pre-change backup</li>
+  </ol>
+  <p>Then call the number and hear the normal greeting. That's the test that settles it.</p>
+
+  <div class="caveat">
+    <span class="cv-ico"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3l7 13H3z" fill="none" stroke="#A5690B" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 8v4" stroke="#A5690B" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1" fill="#A5690B"/></svg></span>
+    <div><h3>Back up before you touch it</h3><p>Export the auto attendant with <span class="k">Get-CsAutoAttendant | ConvertTo-Json -Depth 15</span> before the change. It's the only way check 6 has something to compare against, and the only record of how the live menu was wired if something goes wrong.</p></div>
+  </div>
+
+<div class="sources">
+<h2>Sources &amp; further reading</h2>
+<ul>
+  <li><a href="https://learn.microsoft.com/en-us/microsoftteams/manage-voice-applications-policies">Manage voice applications policies in Microsoft Teams</a><span>what authorized users can change, and which settings need Teams Premium</span></li>
+</ul>
+</div>
+
+</div>
+</article>
+
+
+<section class="comments">
+  <div class="comments-head">
+    <h2>Comments</h2>
+    <p>Questions or corrections welcome. Sign in with GitHub to join the thread.</p>
+  </div>
+  <script src="https://giscus.app/client.js"
+    data-repo="iamrammudigina/blog-comments"
+    data-repo-id="R_kgDOT2hsvg"
+    data-category="Announcements"
+    data-category-id="DIC_kwDOT2hsvs4DDOrm"
+    data-mapping="pathname"
+    data-strict="0"
+    data-reactions-enabled="1"
+    data-emit-metadata="0"
+    data-input-position="bottom"
+    data-theme="light"
+    data-lang="en"
+    crossorigin="anonymous"
+    async>
+  </script>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Ram Mudigina · Ground Truth</span>
+    <span><a href="/index.html">Home</a> · <a href="/about.html">About</a></span>
+  </div>
+</footer>
+
+</body>
+</html>
